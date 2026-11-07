@@ -55,7 +55,7 @@ function rowsOf(b: BookInfo): [string, string | null | undefined][] {
   }
   return [
     ['作者', b.authors.join('、')], ['出版社', b.publisher], ['出版日期', b.date], ['版次', b.edition],
-    ['頁數', b.pages ? `${b.pages} 頁` : null], ['價格', b.price], ['語言', b.language],
+    ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['語言', b.language],
     ['分類', b.categories.join('、')], ['ISBN-13', b.code], ['ISBN-10', b.isbn10],
     ['產地判斷', b.regionLabel], ['資料來源', b.sources.join('、')],
   ]

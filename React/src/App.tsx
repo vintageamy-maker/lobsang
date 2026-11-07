@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { lookupCode, searchCatalog, HttpError, type BookInfo, type CatalogItem, type LookupResult } from './books'
 import { BookDetail, Links, StatusChips } from './BookCard'
-import { fetchEslite, mergeEslite, toIsbn13 } from './eslite'
+import { esliteCode, fetchEslite, mergeEslite } from './eslite'
 import { BarcodeScanner, canScan } from './BarcodeScanner'
 
 type Tab = 'lookup' | 'catalog'
@@ -51,7 +51,7 @@ function LookupView({ initial }: { initial: string }) {
     const my = ++seq.current
     setBusy(true); setErr(null); setRes(null); setDetailOpen(false); setEsliteBusy(false)
     // ⭐ 誠品在瀏覽器查（見 eslite.ts），跟伺服器的查詢同時出發；伺服器結果先顯示，誠品回來再補上
-    const isbn = toIsbn13(raw)
+    const isbn = esliteCode(raw)   // ISBN 或商品條碼（誠品也賣商品）
     const eslite = isbn ? fetchEslite(isbn) : null
     let ok = false
     try {
@@ -203,7 +203,7 @@ function CatalogView() {
 }
 
 /**
- * 一本書的摘要：只放書名、作者、出版社、價格，其他資料按「詳細內容」看。
+ * 一本書的摘要：只放書名、作者、出版社、定價，其他資料按「詳細內容」看。
  * 「搜尋書單」的清單和「用 ISBN 查」的結果共用，兩邊長得一樣。
  */
 function BookSummary({ title, authors, publisher, price, authorLabel = '作者', badge, onDetail }: {
@@ -222,7 +222,7 @@ function BookSummary({ title, authors, publisher, price, authorLabel = '作者',
         <strong>{title}</strong>
         {authors && <span>{authorLabel}：{authors}</span>}
         {publisher && <span>出版社：{publisher}</span>}
-        <span>價格：{price ? <b className="price">{price}</b> : '—'}</span>
+        <span>定價：{price ? <b className="price">{price}</b> : '—'}</span>
       </div>
       {onDetail && <button className="btn-detail" onClick={onDetail}>詳細內容</button>}
     </div>

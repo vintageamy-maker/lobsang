@@ -8,7 +8,7 @@ import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadO
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
 import { BarcodeScanner, canScan } from '../components/BarcodeScanner'
-import { fetchEslite, mergeEslite, toIsbn13 } from '../components/eslite'
+import { esliteCode, fetchEslite, mergeEslite } from '../components/eslite'
 
 /**
  * 書單（Lobsang，2026-11-07）
@@ -78,7 +78,7 @@ type AdminLookup = { result: LookupResult; existingId: number | null; existingNo
  * ⭐ 合併後的 info 存進書單時會一起送到後端（DataJson），所以書單裡的書也帶有誠品的資料。
  */
 async function adminLookup(code: string): Promise<AdminLookup> {
-  const isbn = toIsbn13(code)
+  const isbn = esliteCode(code)   // ISBN 或商品條碼（誠品也賣商品）
   const [r, outcome] = await Promise.all([
     api.get<AdminLookup>(`/api/admin/books/lookup?code=${encodeURIComponent(code)}`),
     isbn ? fetchEslite(isbn) : Promise.resolve(null),
@@ -164,7 +164,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'edition', label: '版次', width: 12, get: b => b.info?.edition },
   { key: 'pages', label: '頁數', width: 7, get: b => b.info?.pages },
   { key: 'quantity', label: '規格／容量', width: 14, get: b => b.info?.quantity },
-  { key: 'price', label: '價格', common: true, width: 12, get: b => b.info?.price },
+  { key: 'price', label: '定價', common: true, width: 12, get: b => b.info?.price },
   { key: 'language', label: '語言', width: 8, get: b => b.info?.language },
   { key: 'categories', label: '分類', width: 20, get: b => b.info?.categories?.join('、') },
   { key: 'region', label: '產地／條碼註冊地', width: 16, get: b => (b.kind === 'product' ? b.info?.gs1 : b.info?.regionLabel) },
@@ -282,7 +282,7 @@ function infoItems(b: BookInfo) {
     ? [['品牌', b.brand], ['規格', b.quantity], ['分類', b.categories.join('、')], ['銷售地區', b.countries],
        ['條碼註冊地', b.gs1], ['條碼', b.code], ['資料來源', b.sources.join('、')]]
     : [['作者', b.authors.join('、')], ['出版社', b.publisher], ['出版日期', b.date], ['版次', b.edition],
-       ['頁數', b.pages ? `${b.pages} 頁` : null], ['價格', b.price], ['語言', b.language],
+       ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['語言', b.language],
        ['分類', b.categories.join('、')], ['ISBN-13', b.code], ['ISBN-10', b.isbn10],
        ['產地判斷', b.regionLabel], ['資料來源', b.sources.join('、')]]
   return rows.filter(r => r[1]).map(([k, v]) => ({ key: k, label: k, children: v }))
@@ -674,7 +674,7 @@ export default function Books() {
             { title: '作者／品牌', dataIndex: 'authors', width: 160, ellipsis: true },
             { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
             { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
-            { title: '價格', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
+            { title: '定價', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
             { title: 'ISBN／條碼', dataIndex: 'code', width: 140, ellipsis: true },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
             { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },

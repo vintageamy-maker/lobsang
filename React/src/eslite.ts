@@ -29,13 +29,32 @@ export interface EsliteBook {
   toc?: string
   authorIntro?: string
   cover?: string
+  // 商品（非書）才有的
+  isBook: boolean
+  brand?: string
+  quantity?: string      // 重量／容量／尺寸
+  origin?: string        // 產地
+  ingredients?: string   // 成分
 }
 
 /** 誠品查詢的結果：book=null 代表誠品沒有這本；error 代表連不上或格式不對 */
 export type EsliteOutcome = { book: EsliteBook | null } | { error: string }
 
-/** 把輸入轉成 ISBN-13（不是 ISBN 就回 null，不去問誠品） */
-export function toIsbn13(raw: string): string | null {
+/**
+ * 把輸入轉成誠品查得到的號碼：ISBN（10 碼轉 13 碼）、EAN-13、EAN-8、UPC-A（12 碼前面補 0）。
+ * 不是這些格式就回 null，不去問誠品。
+ * ⭐ 誠品也賣食品、文具、生活用品，商品條碼也查得到（例：4711092084958 上下游柳丁果乾片，2026-11-07）
+ */
+export function esliteCode(raw: string): string | null {
+  const s = raw.replace(/[\s-]/g, '')
+  const isbn = toIsbn13(s)
+  if (isbn) return isbn
+  if (/^\d{13}$/.test(s) || /^\d{8}$/.test(s)) return s
+  if (/^\d{12}$/.test(s)) return '0' + s
+  return null
+}
+
+function toIsbn13(raw: string): string | null {
   const s = raw.replace(/[\s-]/g, '').toUpperCase()
   if (/^97[89]\d{10}$/.test(s)) return s
   if (/^\d{9}[\dX]$/.test(s)) {
@@ -63,14 +82,15 @@ function htmlToText(html?: string | null): string | undefined {
 
 const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 
-export async function fetchEslite(isbn13: string): Promise<EsliteOutcome> {
+export async function fetchEslite(code: string): Promise<EsliteOutcome> {
   const ctl = new AbortController()
   const timer = window.setTimeout(() => ctl.abort(), TIMEOUT_MS)
   try {
-    const s = await getJson(`${API}/v2/search?q=${isbn13}&size=5&start=0`, ctl.signal)
-    // ⚠ 搜尋是關鍵字比對，要確認 ISBN 真的相同，不然可能拿到別本
+    const s = await getJson(`${API}/v2/search?q=${code}&size=5&start=0`, ctl.signal)
+    // ⚠ 搜尋是關鍵字比對，要確認 ISBN／條碼真的相同，不然可能拿到別本（UPC 補的 0 也要能對上）
+    const same = (v?: string) => !!v && (v === code || v === code.replace(/^0/, ''))
     const hit = (s?.hits?.hit ?? []).find((h: { fields?: { isbn?: string; ean?: string } }) =>
-      h.fields?.isbn === isbn13 || h.fields?.ean === isbn13)
+      same(h.fields?.isbn) || same(h.fields?.ean))
     if (!hit) return { book: null }
 
     const p = await getJson(`${API}/v1/products/${encodeURIComponent(hit.id)}`, ctl.signal)
@@ -82,11 +102,13 @@ export async function fetchEslite(isbn13: string): Promise<EsliteOutcome> {
       htmlToText((p.descriptions ?? []).find((d: { name?: string }) => d.name === name)?.description)
     const photos: { id?: number; large_path?: string }[] = p.photos ?? []
     const photo = photos.find(x => x.id === p.default_product_photo_id) ?? photos[0]
-    const people = [
-      nonEmpty(p.author),
-      nonEmpty(p.painter) && `${p.painter.trim()}（繪）`,
-      nonEmpty(p.translator) && `${p.translator.trim()}（譯）`,
-    ].filter((v): v is string => !!v)
+    // 繪者／譯者跟作者是同一人時不重複列（例：Peter Rabbit 作者和繪者都是 Beatrix Potter）
+    const author = nonEmpty(p.author)
+    const other = (v: unknown, role: string) => {
+      const name = nonEmpty(v)
+      return name && name !== author ? `${name}（${role}）` : undefined
+    }
+    const people = [author, other(p.painter, '繪'), other(p.translator, '譯')].filter((v): v is string => !!v)
     const pages = Number.parseInt(spec('pages') ?? '', 10)
     // ⚠ v1 商品 API：final_price＝定價、retail_price＝售價（跟搜尋 API 的命名相反）
     const listPrice = Number(p.final_price)
@@ -95,7 +117,7 @@ export async function fetchEslite(isbn13: string): Promise<EsliteOutcome> {
       book: {
         id: String(hit.id),
         url: `https://www.eslite.com/product/${encodeURIComponent(hit.id)}`,
-        title: nonEmpty(p.name) ?? isbn13,
+        title: nonEmpty(p.name) ?? code,
         subtitle: nonEmpty(p.sub_title),
         authors: [...new Set(people)],
         publisher: nonEmpty(p.supplier),
@@ -110,6 +132,11 @@ export async function fetchEslite(isbn13: string): Promise<EsliteOutcome> {
         toc: desc('產品目錄'),
         authorIntro: desc('作者介紹'),
         cover: nonEmpty(photo?.large_path),
+        isBook: p.is_book !== false && p.product_type !== 'non-book',
+        brand: nonEmpty(p.brand_name),
+        quantity: spec('weight') ?? spec('capacity') ?? spec('volume') ?? spec('size'),
+        origin: spec('origin'),
+        ingredients: spec('element'),
       },
     }
   } catch (e) {
@@ -138,6 +165,10 @@ interface InfoLike {
   toc?: string | null
   covers: string[]
   sources: string[]
+  brand?: string | null
+  quantity?: string | null
+  countries?: string | null
+  ingredients?: string | null
 }
 interface ResultLike<I extends InfoLike> {
   code?: string | null
@@ -152,7 +183,7 @@ interface ResultLike<I extends InfoLike> {
 const NAME = '誠品線上'
 
 /** 回傳合併後的新結果（不改原本的物件） */
-export function mergeEslite<I extends InfoLike, R extends ResultLike<I>>(result: R, isbn13: string, outcome: EsliteOutcome): R {
+export function mergeEslite<I extends InfoLike, R extends ResultLike<I>>(result: R, code: string, outcome: EsliteOutcome): R {
   // 誠品是第 1 順位：查詢來源、其他網站、資料來源都排第一個
   const statuses = [
     'error' in outcome
@@ -168,23 +199,40 @@ export function mergeEslite<I extends InfoLike, R extends ResultLike<I>>(result:
     { label: NAME, url: e.url },
     ...result.links.filter(l => !l.label.includes('誠品')),
   ]
-  const base = (result.info ?? { kind: 'book', code: isbn13, authors: [], categories: [], covers: [], sources: [] }) as I
+  const base = (result.info ?? {
+    kind: e.isBook ? 'book' : 'product', code, authors: [], categories: [], covers: [], sources: [],
+  }) as I
+  const common = {
+    price: e.listPrice ? `NT$${e.listPrice}` : base.price,
+    categories: e.categories.length ? e.categories : base.categories,
+    covers: e.cover ? [e.cover, ...base.covers.filter(c => c !== e.cover)] : base.covers,
+    sources: [NAME, ...base.sources.filter(s => s !== NAME)],
+  }
+  // 商品（非書）：用品牌、規格、產地、成分，不放作者／出版社
+  if (base.kind === 'product') {
+    const info: I = {
+      ...base, ...common,
+      title: e.title || base.title,
+      brand: e.brand || base.brand,
+      quantity: e.quantity || base.quantity,
+      countries: e.origin || base.countries,
+      ingredients: e.ingredients || base.ingredients,
+      description: e.description || base.description,
+    }
+    return { ...result, found: true, info, statuses, links }
+  }
   // ⭐ 2026-11-07 業主決定：誠品第 1 順位。誠品有值就用誠品的，誠品沒有的欄位才用其他來源（國圖、Google Books…）
   const info: I = {
-    ...base,
+    ...base, ...common,
     title: e.title || base.title,
     subtitle: e.subtitle || base.subtitle,
     authors: e.authors.length ? e.authors : base.authors,
     publisher: e.publisher || base.publisher,
     date: e.date || base.date,
     pages: e.pages || base.pages,
-    price: e.listPrice ? `NT$${e.listPrice}` : base.price,
-    categories: e.categories.length ? e.categories : base.categories,
     language: e.language || base.language,
     description: withAuthorIntro(e.description || base.description, e.authorIntro),
     toc: e.toc || base.toc,
-    covers: e.cover ? [e.cover, ...base.covers.filter(c => c !== e.cover)] : base.covers,
-    sources: [NAME, ...base.sources.filter(s => s !== NAME)],
   }
   return { ...result, found: true, info, statuses, links }
 }
