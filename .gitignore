@@ -1,0 +1,41 @@
+# Obsidian 個人工作區狀態
+lobsang/.obsidian/workspace*
+
+# Claude Code 本機設定
+.claude/settings.local.json
+.claude/*.lock
+
+# .NET
+API/**/bin/
+API/**/obj/
+API/**/.vs/
+*.csproj.user
+# ⚠ 含 DB 帳密、JWT 金鑰、LINE 金鑰的本機設定，不入版控
+appsettings.Development.json
+
+# React / Node
+node_modules/
+React/dist/
+ReactAdmin/dist/
+*.tsbuildinfo
+
+# ⚠ 部署用的 .env（含帳密）只放 VM，範本是 deploy/stage/env.example
+.env
+.env.*
+!deploy/stage/env.example
+
+# 部署產物
+deploy/**/publish/
+deploy/**/dist/
+deploy/**/admin-dist/
+# ⚠ 使用者上傳的檔案（本機儲存後端的根目錄），一個字都不可以進版控
+deploy/**/uploads/
+uploads/
+
+# LINE 金鑰
+**/token.txt
+**/*.secret
+
+# ⚠⚠ 客戶提供的原始資料（常含個資）一律不入版控。
+#   新的批次資料夾一出現就要在這裡補一行，不要依賴 git add -A 前「記得排除」。
+Document/提供資料/

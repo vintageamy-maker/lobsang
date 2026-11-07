@@ -1,0 +1,6 @@
+@Lobsang_HostAddress = http://localhost:5185
+
+GET {{Lobsang_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

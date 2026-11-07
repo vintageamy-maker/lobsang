@@ -1,0 +1,250 @@
+/* =====================================================================
+   設計 token —— **單一真相在這裡**
+   =====================================================================
+
+   為什麼要有這一段：改版前色碼與字級是逐處硬編碼的（42 個不重複色碼、
+   13 種字級散在 20 幾個檔案裡，光「次要文字灰」就有三種寫法、出現 87 次）。
+   要調一次主色深淺或加暗色模式，得手改近百處。
+
+   ⚠ 兩個必須知道的例外：
+
+   1. **本區塊自己一律寫字面色碼** —— 這裡是定義，不是引用。
+
+   2. **antd 的 ConfigProvider 讀不到 CSS 變數** —— `main.tsx` 的 theme token
+      必須寫字面值。那是本檔以外唯一一份重複，改色時兩邊都要動（那邊有註解指回這裡）。
+
+   字級只有五階（11／12／13／16／20）＋ antd 預設 14。
+   收斂前的 10／10.5／11.5 併入 11，12.5 併入 12，13.5 併入 13，15 併入 16，18 併入 20 ——
+   每一項的位移都 ≤1.5px，肉眼幾乎看不出來，但從此只有五個值要維護。
+   ===================================================================== */
+
+:root {
+  /* 主色（琥珀）—— strong 用於需要被看見的數字與強調文字 */
+  --c-primary: #d97706;
+  --c-primary-strong: #b45309;
+  --c-primary-bg: #fffbeb;
+  --c-primary-border: #fbbf24;
+
+  /* 語意色 */
+  --c-danger: #dc2626;
+  --c-danger-strong: #b91c1c;
+  --c-danger-bg: #fef2f2;
+  --c-success: #059669;
+  /* ⚠ 不可由 --c-success 推導 —— antd 依它推出的底色是濁灰綠（#C1D6CC），
+     與其他狀態的淡底不同調。明確指定 emerald-50，見 main.tsx 的說明 */
+  --c-success-bg: #ecfdf5;
+  --c-warning-bg: #fef3c7;
+  --c-warning-text: #92400e;
+  --c-accent: #7c3aed;          /* 制度／分級一類的標註 */
+  --c-info: #0891b2;            /* 中性資訊（「不限」「無上限」一類） */
+  --c-info-strong: #0f766e;     /* 週年制／期間一類的標註 */
+  --c-urgent-bg: #fff7ed;       /* 待辦「待處理」列的底色 */
+  --c-selected-bg: #eef2ff;     /* 左側清單的選取態 */
+  --c-selected-border: #c7d2fe;
+
+  /* 文字（由深到淺）—— muted 是佔位與附註，secondary 是說明文字 */
+  --c-text: #0f172a;
+  --c-text-body: #1e293b;
+  --c-text-strong: #334155;
+  --c-text-secondary: #64748b;
+  --c-text-muted: #94a3b8;
+  /* 深底（登入頁側欄、深色選單）上的淺色文字 —— 與邊框色值相同但語意不同，
+     分開命名才不會在調整邊框時把登入頁的文字一起改掉 */
+  --c-text-on-dark: #e2e8f0;
+  --c-text-on-dark-dim: #cbd5e1;
+
+  /* 介面線與底 */
+  --c-border: #e2e8f0;
+  --c-border-strong: #cbd5e1;
+  --c-bg-page: #f1f5f9;
+  --c-bg-subtle: #f8fafc;
+  --c-sider-bg: #001529;        /* 深色側欄（antd 預設深藍） */
+
+  /* 字級 */
+  --fs-xs: 11px;    /* 表格副標、格位附註 */
+  --fs-sm: 12px;    /* 次要說明 */
+  --fs-md: 13px;    /* 緊湊內文（antd 預設 14px 為一般內文） */
+  --fs-lg: 16px;    /* 區塊標題 */
+  --fs-xl: 20px;    /* 頁面標題 */
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  background: var(--c-bg-page);
+  color: var(--c-text-body);
+  min-height: 100vh;
+}
+
+/* ===== 登入頁專用樣式（全部收斂在 .login-page 之下，避免洩漏到 antd 元件） ===== */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-panel {
+  display: flex;
+  width: 100%;
+  max-width: 860px;
+  background: #fff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, .12);
+}
+
+.brand-side {
+  flex: 1.1;
+  background: linear-gradient(150deg, var(--c-text) 0%, var(--c-text-body) 55%, var(--c-text-strong) 100%);
+  color: #fff;
+  padding: 44px 40px;
+  display: flex;
+  flex-direction: column;
+}
+.brand-badge {
+  align-self: flex-start;
+  background: rgba(217, 119, 6, .18);
+  color: var(--c-primary-border);
+  border: 1px solid rgba(251, 191, 36, .35);
+  font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+  padding: 4px 12px; border-radius: 999px; margin-bottom: 22px;
+}
+.brand-side h1 { font-size: 28px; font-weight: 900; line-height: 1.35; }
+.brand-side p { margin-top: 8px; color: var(--c-text-on-dark-dim); font-size: 14px; }
+.brand-points { margin-top: auto; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.brand-points li {
+  font-size: 13px; color: var(--c-text-on-dark);
+  padding-left: 18px; position: relative;
+}
+.brand-points li::before {
+  content: ""; position: absolute; left: 0; top: 6px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c-primary);
+}
+
+.form-side { flex: 1; padding: 44px 40px; display: flex; flex-direction: column; }
+.form-side h2 { font-size: 22px; font-weight: 800; }
+.form-hint { font-size: 13px; color: var(--c-text-secondary); margin: 6px 0 24px; }
+
+.login-page form { display: flex; flex-direction: column; gap: 16px; }
+.login-page form label {
+  font-size: 13px; font-weight: 600; color: var(--c-text-strong);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.login-page form input {
+  width: 100%; padding: 10px 12px; font-size: 14px;
+  border: 1px solid var(--c-border-strong); border-radius: 8px; outline: none;
+}
+.login-page form input:focus { border-color: var(--c-primary); box-shadow: 0 0 0 3px rgba(217,119,6,.15); }
+
+.pwd-wrap { position: relative; }
+.pwd-toggle {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  border: none; background: none; color: var(--c-text-muted); font-size: 12px; cursor: pointer;
+}
+.pwd-toggle:hover { color: var(--c-primary); }
+
+.btn-login {
+  margin-top: 6px; padding: 11px; font-size: 15px; font-weight: 700;
+  color: #fff; background: var(--c-primary); border: none; border-radius: 8px; cursor: pointer;
+}
+.btn-login:not(:disabled):hover { background: var(--c-primary-strong); }
+.btn-login:disabled { opacity: .5; cursor: not-allowed; }
+
+.notice {
+  font-size: 13px; color: var(--c-warning-text); background: var(--c-warning-bg);
+  border: 1px solid #fde68a; border-radius: 8px; padding: 10px 12px; text-align: center;
+}
+
+.quick-login {
+  margin-top: 20px; padding: 12px 14px;
+  background: var(--c-bg-subtle); border: 1px dashed var(--c-border-strong); border-radius: 10px;
+}
+.quick-title { font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-muted); letter-spacing: .5px; margin-bottom: 8px; }
+.quick-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-btn {
+  font-size: var(--fs-sm); padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--c-border); background: #fff; color: var(--c-text-strong); cursor: pointer;
+}
+.quick-btn:hover { border-color: var(--c-primary); color: var(--c-primary-strong); background: var(--c-primary-bg); }
+
+.back-link { margin-top: auto; padding-top: 22px; font-size: 13px; color: var(--c-text-secondary); text-decoration: none; }
+.back-link:hover { color: var(--c-primary); }
+
+.login-foot { margin-top: 20px; font-size: var(--fs-sm); color: var(--c-text-muted); }
+
+@media (max-width: 720px) {
+  .brand-side { display: none; }
+  .form-side { padding: 30px 24px; }
+  .login-page { padding: 14px; }
+}
+
+/* ===== 後台版面 RWD ===== */
+
+.admin-content { padding: 20px; }
+
+@media (max-width: 768px) {
+  .admin-content { padding: 10px; }
+}
+
+/* 行動版選單抽屜：深色底，與桌機側欄一致 */
+.admin-nav-drawer { background: var(--c-sider-bg) !important; }
+.admin-nav-drawer .ant-menu { border-inline-end: none; }
+
+/* 側邊欄選單的捲動區：深色底上不要用瀏覽器預設的亮色捲軸。
+   選單展開多個群組後會超過一個畫面高，
+   捲軸必須存在但不該搶戲，故做細、只在需要時出現。 */
+/* 逾期的列：整列淡紅底。
+   ⚠ 只加底色**不夠** —— 色盲者分不出來，所以狀態欄同時有文字標籤與圖示，
+     底色只是輔助。「用顏色當唯一訊息」是無障礙的典型錯誤。 */
+.row-overdue > td { background: #fef2f2 !important; }
+.row-overdue:hover > td { background: #fee2e2 !important; }
+
+.admin-nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.25) transparent; }
+.admin-nav-scroll::-webkit-scrollbar { width: 6px; }
+.admin-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.25); border-radius: 3px; }
+.admin-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.4); }
+.admin-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ===== 選單管理：可拖曳樹狀清單 ===== */
+
+.menu-list, .menu-children { list-style: none; }
+.menu-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 6px; border-bottom: 1px solid var(--c-bg-page);
+  background: #fff;
+}
+.menu-drag-handle {
+  border: none; background: none; cursor: grab; color: var(--c-text-muted);
+  font-size: 15px; padding: 4px 6px; border-radius: 6px; touch-action: none;
+}
+.menu-drag-handle:hover { background: var(--c-bg-page); color: var(--c-primary); }
+.menu-drag-handle:active { cursor: grabbing; }
+.menu-row-name { font-weight: 600; font-size: 14px; min-width: 90px; }
+.menu-row-meta { font-size: var(--fs-sm); color: var(--c-text-secondary); }
+.menu-row-meta code {
+  background: var(--c-bg-page); padding: 1px 6px; border-radius: 4px; font-size: 12px;
+}
+.menu-row-perm { min-width: 0; }
+.menu-row-actions { margin-left: auto; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .menu-row { flex-wrap: wrap; }
+  .menu-row-actions { margin-left: 0; width: 100%; padding-left: 30px; }
+}
+
+/* 有待處理事項的列淡黃底，讓異常從一大片正常裡跳出來 */
+.row-warn > td { background: var(--c-primary-bg); }
+.row-warn:hover > td { background: var(--c-warning-bg) !important; }
+
+/* 列印：隱藏操作元件 */
+@media print {
+  .ant-layout-sider, .ant-layout-header, .ant-layout-footer,
+  .ant-card-extra, .ant-tabs-nav { display: none !important; }
+  .admin-content { padding: 0; }
+}
+

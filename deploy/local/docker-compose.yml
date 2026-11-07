@@ -1,0 +1,23 @@
+# 本機開發用 MySQL（只給自己電腦用，不是部署設定）
+# 啟動：在這個資料夾執行 docker compose up -d
+# 帳密放在同資料夾的 .env（不入版控，範本見 env.example）
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: lobsang-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: Lobsang
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Taipei
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "127.0.0.1:3306:3306"   # 只開給本機，區網連不到
+    volumes:
+      - lobsang-mysql-data:/var/lib/mysql
+volumes:
+  lobsang-mysql-data:

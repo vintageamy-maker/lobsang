@@ -1,0 +1,57 @@
+# Lobsang **開發站**（lobsang.helwin.com.tw）
+#
+# VM 位置：~/lobsang/docker-compose.yml（本檔是版控中的正本；改了要同步到 VM）
+# ⭐ 對外入口共用 edge-edge-1，依 Host 分流 → 本站的網路別名 `lobsang-proxy`。
+#    ⚠ 別名不可改 —— edge 的 conf.d/10-base.conf 裡寫的就是這個名字。
+# ⚠ 改了環境變數一定要 `docker compose up -d`；`restart` 讀不到新的環境變數（而且不會報錯）。
+services:
+  api:
+    image: mcr.microsoft.com/dotnet/aspnet:8.0
+    container_name: lobsang-api
+    restart: unless-stopped
+    working_dir: /app
+    command: ["dotnet", "Lobsang.dll"]
+    volumes:
+      - ./publish:/app
+      - ./uploads:/app/uploads
+    environment:
+      # ⚠⚠ 必須是 Stage，才會讀 appsettings.Stage.json
+      - ASPNETCORE_ENVIRONMENT=Stage
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+      # ⚠ 值放 .env（不入版控，範本見 env.example）
+      - "ConnectionStrings__Default=${LOBSANG_CONN}"
+      - "Jwt__Key=${LOBSANG_JWT_KEY}"
+      # 登入頁的「快速登入」清單。⚠ 只有開發站有；正式站的 compose 不可有這一行。
+      # ⭐ 放伺服器設定而不是前端程式：前端 bundle 公開下載得到，寫在裡面等於公開密碼。
+      # ⚠ 後端還有第二道鎖：ASPNETCORE_ENVIRONMENT=Production 時根本不讀這個值。
+      - "DemoAccounts=${LOBSANG_DEMO_ACCOUNTS}"
+      # LINE（沒有設定 ⇒ LINE 相關功能自動停用，其餘功能照常）
+      - "Line__ChannelSecret=${LINE_CHANNEL_SECRET}"
+      - "Line__ChannelAccessToken=${LINE_CHANNEL_ACCESS_TOKEN}"
+      - "Line__LoginChannelId=${LINE_LOGIN_CHANNEL_ID}"
+      # 主選單卡片「開啟後台」按鈕的網址（留空就不顯示）
+      - Line__AdminUrl=https://lobsang.helwin.com.tw/admin/
+      - "Line__LiffId=${LINE_LIFF_ID}"
+      - Storage__Local__Root=/app/uploads
+      # ⚠⚠ 開發站專用 bucket，不可與正式站共用
+      - Storage__Gcs__Bucket=stage-lobsang
+
+  web:
+    image: nginx:alpine
+    container_name: lobsang-web
+    restart: unless-stopped
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./admin-dist:/usr/share/nginx/admin:ro
+      - ./web.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - lobsang-proxy
+
+networks:
+  edge:
+    external: true
