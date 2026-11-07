@@ -46,6 +46,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: #d97706; border-color: #d97706; color: #fff; font-weight: 700; padding: 9px 20px; }
 .btn-primary:not(:disabled):hover { background: #b45309; }
 .btn-ghost { color: #64748b; }
+.btn-scan { color: #b45309; border-color: #f59e0b; font-weight: 700; white-space: nowrap; }
+.btn-scan:hover { background: #fffbeb; }
 
 .health-list {
   display: grid; grid-template-columns: max-content 1fr; gap: 10px 18px;

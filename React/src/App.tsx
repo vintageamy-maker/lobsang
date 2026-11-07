@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { lookupCode, searchCatalog, HttpError, type CatalogItem, type LookupResult } from './books'
 import { BookDetail, Cover, Links, StatusChips } from './BookCard'
+import { BarcodeScanner, canScan } from './BarcodeScanner'
 
 type Tab = 'lookup' | 'catalog'
 
@@ -38,6 +39,7 @@ function LookupView({ initial }: { initial: string }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [res, setRes] = useState<{ result: LookupResult; inList: boolean } | null>(null)
+  const [scanning, setScanning] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const seq = useRef(0)
 
@@ -68,9 +70,18 @@ function LookupView({ initial }: { initial: string }) {
           placeholder="ISBN 或商品條碼，例如 9786264186421" inputMode="numeric" autoComplete="off"
           aria-label="ISBN 或商品條碼"
         />
+        {canScan() && (
+          <button type="button" className="btn-scan" onClick={() => setScanning(true)} aria-label="用相機掃條碼">📷 掃描</button>
+        )}
         <button className="btn-primary" disabled={busy}>{busy ? '查詢中…' : '查詢'}</button>
       </form>
-      <p className="hint">支援 ISBN-10／13、EAN-13／8、UPC 條碼，可以用條碼掃描器直接掃。台灣書會查國家圖書館，可能要等十幾秒。</p>
+      <p className="hint">支援 ISBN-10／13、EAN-13／8、UPC 條碼，可以按「📷 掃描」用手機相機掃，或用條碼掃描器直接掃。台灣書會查國家圖書館，可能要等十幾秒。</p>
+      {scanning && (
+        <BarcodeScanner
+          onClose={() => setScanning(false)}
+          onDetect={c => { setScanning(false); setCode(c); run(c) }}
+        />
+      )}
 
       {busy && <div className="msg">查詢中…（同時查好幾個資料庫）</div>}
       {err && <div className="msg msg-err">{err}</div>}

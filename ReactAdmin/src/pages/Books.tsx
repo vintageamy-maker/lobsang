@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, type InputRef,
 } from 'antd'
-import { DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
+import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
+import { BarcodeScanner, canScan } from '../components/BarcodeScanner'
 
 /**
  * 書單（Lobsang，2026-11-07）
@@ -129,6 +130,7 @@ export default function Books() {
   const [saving, setSaving] = useState(false)
   const [autoAdd, setAutoAdd] = useState(() => { try { return localStorage.getItem(AUTO_ADD_KEY) === '1' } catch { return false } })
   const inputRef = useRef<InputRef>(null)
+  const [scanning, setScanning] = useState(false)
 
   // ---------- 書單 ----------
   const [rows, setRows] = useState<BookRow[]>([])
@@ -163,12 +165,14 @@ export default function Books() {
     } finally { setSaving(false) }
   }, [load, q])
 
-  const runLookup = async () => {
-    if (!code.trim()) return
+  /** override：相機掃到的條碼（此時 code 這個 state 還沒更新，要直接帶值） */
+  const runLookup = async (override?: string) => {
+    const c = override ?? code
+    if (!c.trim()) return
     setLooking(true); setLookup(null)
     try {
       const r = await api.get<{ result: LookupResult; existingId: number | null; existingNote: string | null }>(
-        `/api/admin/books/lookup?code=${encodeURIComponent(code)}`)
+        `/api/admin/books/lookup?code=${encodeURIComponent(c)}`)
       setLookup(r)
       setNote(r.existingNote ?? '')
       const res = r.result
@@ -236,16 +240,23 @@ export default function Books() {
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <GuideAlert id="books-intro" style={{ marginBottom: 0 }} title="用 ISBN 或商品條碼查書，查到後加入書單">
-        書單會公開在主站的「搜尋書單」，任何人都能搜尋；備註只有後台看得到。可以用條碼掃描器直接掃，
+        書單會公開在主站的「搜尋書單」，任何人都能搜尋；備註只有後台看得到。可以按「掃描」用手機相機掃，或用條碼掃描器直接掃，
         勾「查到後自動加入」就能連續掃。台灣書會查國家圖書館，可能要等十幾秒。
       </GuideAlert>
 
       <Card title="Search" extra={<a href="/" target="_blank" rel="noreferrer"><LinkOutlined /> 公開 Search 頁</a>}>
         <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
-          <Input ref={inputRef} value={code} onChange={e => setCode(e.target.value)} onPressEnter={runLookup}
+          <Input ref={inputRef} value={code} onChange={e => setCode(e.target.value)} onPressEnter={() => runLookup()}
             placeholder="ISBN 或商品條碼，例如 9786264186421" inputMode="numeric" autoFocus allowClear />
-          <Button type="primary" icon={<SearchOutlined />} loading={looking} onClick={runLookup}>查詢</Button>
+          {canScan() && <Button icon={<CameraOutlined />} onClick={() => setScanning(true)}>掃描</Button>}
+          <Button type="primary" icon={<SearchOutlined />} loading={looking} onClick={() => runLookup()}>查詢</Button>
         </Space.Compact>
+        {scanning && (
+          <BarcodeScanner
+            onClose={() => setScanning(false)}
+            onDetect={c => { setScanning(false); setCode(c); runLookup(c) }}
+          />
+        )}
         <div style={{ marginTop: 8 }}>
           <Checkbox checked={autoAdd} onChange={e => {
             setAutoAdd(e.target.checked)
