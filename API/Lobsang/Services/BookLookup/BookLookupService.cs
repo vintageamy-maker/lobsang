@@ -101,7 +101,8 @@ namespace Lobsang.Services.BookLookup
             var all = new Dictionary<string, LinkItem>
             {
                 ["books"] = new("博客來", $"https://search.books.com.tw/search/query/key/{isbn}/cat/all"),
-                // ⚠ 誠品線上只能做成連結、不能當自動資料來源：整站有 Cloudflare 機器人防護，程式查詢一律 403（2026-11-07 確認）
+                // ⚠ 誠品線上不能在這裡（伺服器端）查：整站有 Cloudflare 機器人防護，程式查詢一律 403（2026-11-07 確認），業主決定不繞過。
+                //    誠品的資料改由前端在使用者瀏覽器查（React/src/eslite.ts），查到時前端會把這個搜尋連結換成商品頁
                 ["eslite"] = new("誠品線上", $"https://www.eslite.com/Search?keyword={isbn}"),
                 ["ncl"] = new("國圖書號中心", "https://isbn.ncl.edu.tw/NEW_ISBNNet/"),
                 ["amzjp"] = new("Amazon.co.jp", $"https://www.amazon.co.jp/s?k={isbn}"),

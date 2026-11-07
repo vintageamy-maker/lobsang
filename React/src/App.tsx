@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { lookupCode, searchCatalog, HttpError, type BookInfo, type CatalogItem, type LookupResult } from './books'
 import { BookDetail, Links, StatusChips } from './BookCard'
+import { fetchEslite, mergeEslite, toIsbn13 } from './eslite'
 import { BarcodeScanner, canScan } from './BarcodeScanner'
 
 type Tab = 'lookup' | 'catalog'
@@ -41,21 +42,32 @@ function LookupView({ initial }: { initial: string }) {
   const [res, setRes] = useState<{ result: LookupResult; inList: boolean } | null>(null)
   const [scanning, setScanning] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [esliteBusy, setEsliteBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const seq = useRef(0)
 
   const run = useCallback(async (raw: string) => {
     if (!raw.trim()) return
     const my = ++seq.current
-    setBusy(true); setErr(null); setRes(null); setDetailOpen(false)
+    setBusy(true); setErr(null); setRes(null); setDetailOpen(false); setEsliteBusy(false)
+    // ⭐ 誠品在瀏覽器查（見 eslite.ts），跟伺服器的查詢同時出發；伺服器結果先顯示，誠品回來再補上
+    const isbn = toIsbn13(raw)
+    const eslite = isbn ? fetchEslite(isbn) : null
+    let ok = false
     try {
       const r = await lookupCode(raw)
-      if (my === seq.current) setRes(r)
+      if (my === seq.current) { setRes(r); ok = true }
     } catch (e) {
       if (my === seq.current) setErr(e instanceof HttpError ? e.message : '連不到伺服器，請稍後再試。')
     } finally {
       if (my === seq.current) { setBusy(false); inputRef.current?.select() }
     }
+    if (!ok || !eslite || !isbn) return
+    setEsliteBusy(true)
+    const outcome = await eslite
+    if (my !== seq.current) return
+    setEsliteBusy(false)
+    setRes(prev => prev ? { ...prev, result: mergeEslite(prev.result, isbn, outcome) } : prev)
   }, [])
 
   useEffect(() => { if (initial) run(initial) }, [initial, run])
@@ -84,6 +96,7 @@ function LookupView({ initial }: { initial: string }) {
       )}
 
       {busy && <div className="msg">查詢中…（同時查好幾個資料庫）</div>}
+      {esliteBusy && <div className="hint">還在查誠品線上，查到會自動補上資料…</div>}
       {err && <div className="msg msg-err">{err}</div>}
 
       {r && r.error && <div className="msg msg-err">{r.error}</div>}

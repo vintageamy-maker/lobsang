@@ -8,6 +8,7 @@ import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadO
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
 import { BarcodeScanner, canScan } from '../components/BarcodeScanner'
+import { fetchEslite, mergeEslite, toIsbn13 } from '../components/eslite'
 
 /**
  * 書單（Lobsang，2026-11-07）
@@ -69,6 +70,21 @@ interface BookRow {
 }
 
 const AUTO_ADD_KEY = 'lobsang_books_auto_add'
+
+type AdminLookup = { result: LookupResult; existingId: number | null; existingNote: string | null }
+
+/**
+ * 後台查書：伺服器查詢＋誠品線上（在瀏覽器查，見 components/eslite.ts）同時出發，兩邊都回來才合併。
+ * ⭐ 合併後的 info 存進書單時會一起送到後端（DataJson），所以書單裡的書也帶有誠品的資料。
+ */
+async function adminLookup(code: string): Promise<AdminLookup> {
+  const isbn = toIsbn13(code)
+  const [r, outcome] = await Promise.all([
+    api.get<AdminLookup>(`/api/admin/books/lookup?code=${encodeURIComponent(code)}`),
+    isbn ? fetchEslite(isbn) : Promise.resolve(null),
+  ])
+  return isbn && outcome ? { ...r, result: mergeEslite(r.result, isbn, outcome) } : r
+}
 
 // ---------- 連續掃描 ----------
 // ⭐ 相機不關、掃到一個就丟進佇列在背景查詢＋加入書單，使用者不用等查完就能掃下一本
@@ -247,13 +263,15 @@ function applyExportFilter(rows: BookRow[], f: ExportFilter): BookRow[] {
   })
 }
 
-function Cover({ covers, width }: { covers: string[]; width: number }) {
+/** fixed：固定高度（寬 × 1.35）並裁切，書單表格用，不然每本封面比例不同、列高會不一致 */
+function Cover({ covers, width, fixed }: { covers: string[]; width: number; fixed?: boolean }) {
   const [i, setI] = useState(0)
   useEffect(() => setI(0), [covers])
   const src = covers[i]
   if (!src) return <div style={{ width, height: width * 1.35, background: 'var(--c-bg-subtle, #f1f5f9)', borderRadius: 4 }} />
   return (
-    <img key={src} src={src} alt="" referrerPolicy="no-referrer" style={{ width, borderRadius: 4, display: 'block' }}
+    <img key={src} src={src} alt="" referrerPolicy="no-referrer"
+      style={{ width, borderRadius: 4, display: 'block', ...(fixed ? { height: width * 1.35, objectFit: 'cover' as const } : {}) }}
       onLoad={e => { if ((e.target as HTMLImageElement).naturalWidth < 10) setI(i + 1) }}
       onError={() => setI(i + 1)} />
   )
@@ -351,8 +369,7 @@ export default function Books() {
     if (!c.trim()) return
     setLooking(true); setLookup(null)
     try {
-      const r = await api.get<{ result: LookupResult; existingId: number | null; existingNote: string | null }>(
-        `/api/admin/books/lookup?code=${encodeURIComponent(c)}`)
+      const r = await adminLookup(c)
       setLookup(r)
       setNote(r.existingNote ?? '')
       const res = r.result
@@ -380,8 +397,7 @@ export default function Books() {
 
   const processBatch = async (c: string) => {
     try {
-      const r = await api.get<{ result: LookupResult; existingNote: string | null }>(
-        `/api/admin/books/lookup?code=${encodeURIComponent(c)}`)
+      const r = await adminLookup(c)
       const res = r.result
       if (!res.found || !res.info || (res.kind !== 'book' && res.kind !== 'product')) {
         setBatchItem(c, { status: 'notfound', msg: res.error ?? undefined })
@@ -501,7 +517,7 @@ export default function Books() {
   const screens = Grid.useBreakpoint()
   const isNarrow = !screens.md
   const coverCell = (r: BookRow) => (
-    <a onClick={() => setViewing(r)} aria-label={`看「${r.title}」的詳細資料`}><Cover covers={r.info?.covers ?? []} width={36} /></a>
+    <a onClick={() => setViewing(r)} aria-label={`看「${r.title}」的詳細資料`}><Cover covers={r.info?.covers ?? []} width={36} fixed /></a>
   )
   const opCell = (r: BookRow, compact: boolean) => (
     <Space size={4} direction={compact ? 'vertical' : 'horizontal'}>
@@ -627,7 +643,7 @@ export default function Books() {
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
         {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1230 }}
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1260 }}
           pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: p => load(q, p), size: isNarrow ? 'small' : undefined }}
           columns={isNarrow ? [
             { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
@@ -653,12 +669,13 @@ export default function Books() {
           ] : [
             { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
             { title: '類型', dataIndex: 'kind', width: 64, render: k => k === 'product' ? <Tag>商品</Tag> : <Tag color="blue">書</Tag> },
-            { title: '名稱', dataIndex: 'title', width: 220, render: (t: string, r) => <a onClick={() => setViewing(r)}>{t}</a> },
-            { title: '作者／品牌', dataIndex: 'authors', width: 160 },
-            { title: '出版社／規格', dataIndex: 'publisher', width: 140 },
-            { title: '出版日期', dataIndex: 'pubDate', width: 100 },
-            { title: '價格', key: 'price', width: 90, render: (_, r) => r.info?.price ?? '' },
-            { title: 'ISBN／條碼', dataIndex: 'code', width: 130 },
+            // ⭐ 文字欄一律單行、太長用「…」（滑過去看全文），每列高度才會一致
+            { title: '名稱', dataIndex: 'title', width: 220, ellipsis: { showTitle: false }, render: (t: string, r) => <a onClick={() => setViewing(r)} title={t}>{t}</a> },
+            { title: '作者／品牌', dataIndex: 'authors', width: 160, ellipsis: true },
+            { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
+            { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
+            { title: '價格', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
+            { title: 'ISBN／條碼', dataIndex: 'code', width: 140, ellipsis: true },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
             { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },
           ]}
