@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { lookupCode, searchCatalog, HttpError, type CatalogItem, type LookupResult } from './books'
-import { BookDetail, Cover, Links, StatusChips } from './BookCard'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { lookupCode, searchCatalog, HttpError, type BookInfo, type CatalogItem, type LookupResult } from './books'
+import { BookDetail, Links, StatusChips } from './BookCard'
 import { BarcodeScanner, canScan } from './BarcodeScanner'
 
 type Tab = 'lookup' | 'catalog'
@@ -40,13 +40,14 @@ function LookupView({ initial }: { initial: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [res, setRes] = useState<{ result: LookupResult; inList: boolean } | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const seq = useRef(0)
 
   const run = useCallback(async (raw: string) => {
     if (!raw.trim()) return
     const my = ++seq.current
-    setBusy(true); setErr(null); setRes(null)
+    setBusy(true); setErr(null); setRes(null); setDetailOpen(false)
     try {
       const r = await lookupCode(raw)
       if (my === seq.current) setRes(r)
@@ -98,11 +99,23 @@ function LookupView({ initial }: { initial: string }) {
         </div>
       )}
 
+      {/* ⭐ 跟「搜尋書單」一樣：先只顯示摘要，全部資料按「詳細內容」用彈窗看 */}
       {r && !r.error && !r.card && r.found && r.info && (
-        <BookDetail info={r.info} badge={res?.inList ? <span className="badge">在書單裡</span> : null}>
+        <BookSummary
+          title={r.info.title ?? r.code ?? ''}
+          authors={r.info.kind === 'product' ? r.info.brand : r.info.authors.join('、')}
+          authorLabel={r.info.kind === 'product' ? '品牌' : '作者'}
+          publisher={r.info.publisher}
+          price={r.info.price}
+          badge={res?.inList ? <span className="badge">在書單裡</span> : null}
+          onDetail={() => setDetailOpen(true)}
+        />
+      )}
+      {detailOpen && r?.info && (
+        <DetailModal info={r.info} onClose={() => setDetailOpen(false)}>
           <StatusChips statuses={r.statuses} />
           <Links title="其他網站：" links={r.links} />
-        </BookDetail>
+        </DetailModal>
       )}
 
       {r && !r.error && !r.card && !r.found && (
@@ -140,15 +153,6 @@ function CatalogView() {
 
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
-  if (open?.info) {
-    return (
-      <>
-        <button className="btn-ghost back" onClick={() => setOpen(null)}>← 回書單</button>
-        <BookDetail info={open.info} />
-      </>
-    )
-  }
-
   return (
     <>
       <form className="search" onSubmit={e => { e.preventDefault(); load(q, 1) }}>
@@ -162,20 +166,12 @@ function CatalogView() {
           {data.items.length === 0 ? (
             <div className="card empty">{q.trim() ? '書單裡沒有符合的書。' : '書單還是空的。'}</div>
           ) : (
+            // ⭐ 清單只放書名、作者、出版社、價格；其他資料按「詳細內容」用彈窗看
             <ul className="catalog">
               {data.items.map(b => (
                 <li key={b.code}>
-                  <button className="catalog-item" onClick={() => setOpen(b)} disabled={!b.info}>
-                    <Cover covers={b.info?.covers ?? []} small />
-                    <span className="catalog-text">
-                      <strong>{b.title}</strong>
-                      <span>{[b.authors, b.publisher, b.pubDate].filter(Boolean).join(' ・ ')}</span>
-                      <span>
-                        {b.info?.price && <b className="price">{b.info.price}</b>}
-                        <span className="mono">{b.code}</span>
-                      </span>
-                    </span>
-                  </button>
+                  <BookSummary title={b.title} authors={b.authors} publisher={b.publisher} price={b.info?.price}
+                    onDetail={b.info ? () => setOpen(b) : undefined} />
                 </li>
               ))}
             </ul>
@@ -189,6 +185,58 @@ function CatalogView() {
           )}
         </>
       )}
+      {open?.info && <DetailModal info={open.info} onClose={() => setOpen(null)} />}
     </>
+  )
+}
+
+/**
+ * 一本書的摘要：只放書名、作者、出版社、價格，其他資料按「詳細內容」看。
+ * 「搜尋書單」的清單和「用 ISBN 查」的結果共用，兩邊長得一樣。
+ */
+function BookSummary({ title, authors, publisher, price, authorLabel = '作者', badge, onDetail }: {
+  title: string
+  authors?: string | null
+  publisher?: string | null
+  price?: string | null
+  authorLabel?: string
+  badge?: ReactNode
+  onDetail?: () => void
+}) {
+  return (
+    <div className="catalog-item">
+      <div className="catalog-text">
+        {badge}
+        <strong>{title}</strong>
+        {authors && <span>{authorLabel}：{authors}</span>}
+        {publisher && <span>出版社：{publisher}</span>}
+        <span>價格：{price ? <b className="price">{price}</b> : '—'}</span>
+      </div>
+      {onDetail && <button className="btn-detail" onClick={onDetail}>詳細內容</button>}
+    </div>
+  )
+}
+
+/** 書的全部資料（彈窗）。按背景、「關閉」或 Esc 都會關。children 接在資料下面（例如查詢來源、其他網站連結）。 */
+function DetailModal({ info, onClose, children }: { info: BookInfo; onClose: () => void; children?: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'   // 彈窗開著時後面的清單不要跟著捲
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [onClose])
+
+  // ⚠ 不要把焦點放在最下面的「關閉」鈕（autoFocus）：資料長的時候瀏覽器會捲到底，一打開就看不到書名
+  const boxRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { boxRef.current?.focus({ preventScroll: true }) }, [])
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div ref={boxRef} tabIndex={-1} className="modal" role="dialog" aria-modal="true" aria-label={`「${info.title ?? ''}」的詳細內容`} onClick={e => e.stopPropagation()}>
+        <BookDetail info={info}>{children}</BookDetail>
+        <div className="modal-foot"><button className="btn-primary" onClick={onClose}>關閉</button></div>
+      </div>
+    </div>
   )
 }

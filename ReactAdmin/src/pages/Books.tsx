@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, Grid,
   Form, Radio, Select, DatePicker, type InputRef,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
+import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, ScanOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
 import { BarcodeScanner, canScan } from '../components/BarcodeScanner'
@@ -69,6 +69,53 @@ interface BookRow {
 }
 
 const AUTO_ADD_KEY = 'lobsang_books_auto_add'
+
+// ---------- 連續掃描 ----------
+// ⭐ 相機不關、掃到一個就丟進佇列在背景查詢＋加入書單，使用者不用等查完就能掃下一本
+//    （台灣書查國圖要十幾秒，排隊一本本等會很慢，所以同時最多查 BATCH_PARALLEL 本）
+type BatchStatus = 'pending' | 'added' | 'exists' | 'notfound' | 'error'
+interface BatchItem { code: string; status: BatchStatus; title?: string; msg?: string }
+const BATCH_PARALLEL = 3
+const BATCH_LABEL: Record<BatchStatus, string> = {
+  pending: '查詢中…', added: '已加入', exists: '本來就在書單', notfound: '查不到', error: '失敗',
+}
+const BATCH_COLOR: Record<BatchStatus, string> = {
+  pending: 'processing', added: 'success', exists: 'default', notfound: 'error', error: 'error',
+}
+
+function batchCounts(items: BatchItem[]) {
+  const n = (s: BatchStatus) => items.filter(i => i.status === s).length
+  return { added: n('added'), exists: n('exists'), failed: n('notfound') + n('error'), pending: n('pending') }
+}
+
+/** 相機畫面下方的即時結果：總數＋最近 3 本 */
+function BatchOverlay({ items }: { items: BatchItem[] }) {
+  if (!items.length) return <div style={OV.box}>還沒掃到，對準書背的條碼</div>
+  const c = batchCounts(items)
+  return (
+    <div style={OV.box}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+        已掃 {items.length} 本：加入 {c.added}・原本就有 {c.exists}・查不到 {c.failed}{c.pending ? `・查詢中 ${c.pending}` : ''}
+      </div>
+      {items.slice(0, 3).map(i => (
+        <div key={i.code} style={OV.row}>
+          <span style={{ ...OV.status, color: OV_COLOR[i.status] }}>{BATCH_LABEL[i.status]}</span>
+          <span style={OV.title}>{i.title ?? i.code}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+const OV_COLOR: Record<BatchStatus, string> = { pending: '#fcd34d', added: '#4ade80', exists: '#cbd5e1', notfound: '#f87171', error: '#f87171' }
+const OV: Record<string, CSSProperties> = {
+  box: {
+    width: '100%', maxWidth: 420, padding: '10px 14px', borderRadius: 12, background: 'rgba(15,23,42,.78)',
+    color: '#fff', fontSize: 14, lineHeight: 1.6,
+  },
+  row: { display: 'flex', gap: 8, minWidth: 0 },
+  status: { flex: 'none', width: 96 },
+  title: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+}
 
 /** 伺服器回的時間是 UTC 但不帶 Z（後台各頁的慣例），補上再轉本地時間 */
 function localDate(s: string) {
@@ -319,6 +366,64 @@ export default function Books() {
     }
   }
 
+  // ---------- 連續掃描 ----------
+  const [batchScanning, setBatchScanning] = useState(false)
+  const [batch, setBatch] = useState<BatchItem[]>([])
+  const batchSeen = useRef(new Set<string>())   // 這一輪掃過的條碼，重複的不再查
+  const batchWaiting = useRef<string[]>([])
+  const batchActive = useRef(0)
+  const qRef = useRef(q)
+  qRef.current = q
+
+  const setBatchItem = (c: string, patch: Partial<BatchItem>) =>
+    setBatch(list => list.map(i => i.code === c ? { ...i, ...patch } : i))
+
+  const processBatch = async (c: string) => {
+    try {
+      const r = await api.get<{ result: LookupResult; existingNote: string | null }>(
+        `/api/admin/books/lookup?code=${encodeURIComponent(c)}`)
+      const res = r.result
+      if (!res.found || !res.info || (res.kind !== 'book' && res.kind !== 'product')) {
+        setBatchItem(c, { status: 'notfound', msg: res.error ?? undefined })
+        return
+      }
+      // 原本有備註就沿用，不要被清掉
+      const s = await api.post<{ id: number; isNew: boolean }>('/api/admin/books', { info: res.info, note: r.existingNote ?? '' })
+      setBatchItem(c, { status: s.isNew ? 'added' : 'exists', title: res.info.title ?? undefined })
+    } catch (e) {
+      setBatchItem(c, { status: 'error', msg: e instanceof ApiError ? e.message : '連不到伺服器' })
+    }
+  }
+
+  const pumpBatch = () => {
+    while (batchActive.current < BATCH_PARALLEL && batchWaiting.current.length) {
+      const c = batchWaiting.current.shift()!
+      batchActive.current++
+      processBatch(c).finally(() => {
+        batchActive.current--
+        if (!batchActive.current && !batchWaiting.current.length) load(qRef.current, 1)   // 全部查完才重載書單
+        pumpBatch()
+      })
+    }
+  }
+
+  const batchDetect = (c: string) => {
+    if (batchSeen.current.has(c)) { message.info(`${c} 這輪已經掃過了`); return }
+    batchSeen.current.add(c)
+    setBatch(list => [{ code: c, status: 'pending' }, ...list])
+    batchWaiting.current.push(c)
+    pumpBatch()
+  }
+
+  const startBatch = () => {
+    // 上一輪的結果還在畫面上就接著累計；按「清除」才重新開始
+    setBatchScanning(true)
+  }
+  const clearBatch = () => {
+    setBatch([])
+    batchSeen.current = new Set()
+  }
+
   const remove = async (row: BookRow) => {
     try {
       await api.del(`/api/admin/books/${row.id}`)
@@ -416,7 +521,7 @@ export default function Books() {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <GuideAlert id="books-intro" style={{ marginBottom: 0 }} title="用 ISBN 或商品條碼查書，查到後加入書單">
         書單會公開在主站的「搜尋書單」，任何人都能搜尋；備註只有後台看得到。可以按「掃描」用手機相機掃，或用條碼掃描器直接掃，
-        勾「查到後自動加入」就能連續掃。台灣書會查國家圖書館，可能要等十幾秒。
+        一次要掃很多本就按「連續掃描」，相機不會關，掃到就自動加入書單。台灣書會查國家圖書館，可能要等十幾秒。
       </GuideAlert>
 
       <Card title="Search" extra={<a href="/" target="_blank" rel="noreferrer"><LinkOutlined /> 公開 Search 頁</a>}>
@@ -432,12 +537,46 @@ export default function Books() {
             onDetect={c => { setScanning(false); setCode(c); runLookup(c) }}
           />
         )}
-        <div style={{ marginTop: 8 }}>
+        {batchScanning && (
+          <BarcodeScanner continuous onClose={() => setBatchScanning(false)} onDetect={batchDetect}>
+            <BatchOverlay items={batch} />
+          </BarcodeScanner>
+        )}
+        <Space wrap style={{ marginTop: 8 }}>
           <Checkbox checked={autoAdd} onChange={e => {
             setAutoAdd(e.target.checked)
             try { localStorage.setItem(AUTO_ADD_KEY, e.target.checked ? '1' : '0') } catch { /* 無痕模式等 */ }
           }}>查到後自動加入書單</Checkbox>
-        </div>
+          {canScan() && <Button size="small" icon={<ScanOutlined />} onClick={startBatch}>連續掃描（掃到就加入書單）</Button>}
+        </Space>
+
+        {batch.length > 0 && !batchScanning && (() => {
+          const c = batchCounts(batch)
+          return (
+            <Alert style={{ marginTop: 12 }} type={c.failed ? 'warning' : 'success'} showIcon
+              message={`連續掃描 ${batch.length} 本：加入 ${c.added}・原本就有 ${c.exists}・查不到或失敗 ${c.failed}${c.pending ? `・還在查 ${c.pending}` : ''}`}
+              description={
+                <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                  {batch.map(i => (
+                    <div key={i.code} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0' }}>
+                      <Tag color={BATCH_COLOR[i.status]} style={{ flex: 'none' }}>{BATCH_LABEL[i.status]}</Tag>
+                      {/* 查不到的點一下，會帶到上面的查詢框再查一次，看詳細原因 */}
+                      <a onClick={() => { setCode(i.code); runLookup(i.code) }} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {i.title ?? i.code}
+                      </a>
+                      {i.msg && <Typography.Text type="secondary" style={{ fontSize: 12, flex: 'none' }}>{i.msg}</Typography.Text>}
+                    </div>
+                  ))}
+                </div>
+              }
+              action={
+                <Space direction="vertical" size={4}>
+                  <Button size="small" type="primary" onClick={startBatch}>繼續掃</Button>
+                  <Button size="small" onClick={clearBatch} disabled={!!c.pending}>清除</Button>
+                </Space>
+              } />
+          )
+        })()}
 
         {res && (
           <div style={{ marginTop: 16 }}>

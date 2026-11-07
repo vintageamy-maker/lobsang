@@ -115,13 +115,20 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
   width: 100%; display: flex; gap: 14px; align-items: center; text-align: left;
   padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff;
 }
-.catalog-item:not(:disabled):hover { border-color: #d97706; background: #fffbeb; }
-.catalog-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; color: #64748b; }
+.catalog-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; color: #64748b; }
+.catalog-text .badge { align-self: flex-start; margin-bottom: 2px; }
+.btn-detail { flex: none; white-space: nowrap; color: #b45309; border-color: #f59e0b; font-weight: 700; }
+.btn-detail:hover { background: #fffbeb; }
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, .55);
+  display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto;
+}
+.modal { width: 100%; max-width: 760px; outline: none; }
+.modal-foot { display: flex; justify-content: center; margin-top: 12px; }
 .catalog-text strong { font-size: 15px; color: #0f172a; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .catalog-text .price { color: #b45309; margin-right: 8px; }
 .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 16px; font-size: 14px; }
-.back { margin-bottom: 4px; }
 
 @media (max-width: 560px) {
   .page { padding: 28px 16px; }
