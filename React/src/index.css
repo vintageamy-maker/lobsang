@@ -73,7 +73,7 @@ a { color: #b45309; }
 }
 .tabs button.active { color: #b45309; border-bottom-color: #d97706; }
 
-.search { display: flex; gap: 10px; margin-bottom: 8px; }
+.search { display: flex; gap: 10px; margin-bottom: 16px; }
 .search input {
   flex: 1; min-width: 0; padding: 11px 14px; font-size: 16px;
   border: 1px solid #cbd5e1; border-radius: 10px; outline: none; background: #fff;

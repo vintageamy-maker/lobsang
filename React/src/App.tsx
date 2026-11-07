@@ -76,7 +76,6 @@ function LookupView({ initial }: { initial: string }) {
         )}
         <button className="btn-primary" disabled={busy}>{busy ? '查詢中…' : '查詢'}</button>
       </form>
-      <p className="hint">支援 ISBN-10／13、EAN-13／8、UPC 條碼，可以按「📷 掃描」用手機相機掃，或用條碼掃描器直接掃。台灣書會查國家圖書館，可能要等十幾秒。</p>
       {scanning && (
         <BarcodeScanner
           onClose={() => setScanning(false)}
