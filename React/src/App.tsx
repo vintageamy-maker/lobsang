@@ -147,33 +147,37 @@ function CatalogView() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [open, setOpen] = useState<CatalogItem | null>(null)
+  const [searched, setSearched] = useState('')   // 目前結果用的關鍵字（輸入框還在打字時不跟著變）
 
+  // ⭐ 2026-11-07 業主要求：預設不列出書單，要輸入關鍵字按「搜尋」才顯示結果；空白不搜尋（不會列出全部）
   const load = useCallback(async (query: string, p: number) => {
+    const kw = query.trim()
+    if (!kw) { setData(null); setSearched(''); setErr(null); return }
     setBusy(true); setErr(null)
     try {
-      setData(await searchCatalog(query, p))
+      setData(await searchCatalog(kw, p))
+      setSearched(kw)
       setPage(p)
     } catch (e) {
       setErr(e instanceof HttpError ? e.message : '連不到伺服器，請稍後再試。')
     } finally { setBusy(false) }
   }, [])
 
-  useEffect(() => { load('', 1) }, [load])
-
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
   return (
     <>
       <form className="search" onSubmit={e => { e.preventDefault(); load(q, 1) }}>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="書名、作者、出版社或 ISBN" aria-label="搜尋書單" />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="書名、作者、出版社或 ISBN" aria-label="搜尋書單" autoFocus />
         <button className="btn-primary" disabled={busy}>{busy ? '搜尋中…' : '搜尋'}</button>
       </form>
       {err && <div className="msg msg-err">{err}</div>}
+      {!data && !err && <p className="hint">輸入書名、作者、出版社或 ISBN，按「搜尋」查詢我們的書單。</p>}
       {data && (
         <>
-          <p className="hint">共 {data.total} 筆{q.trim() ? `（關鍵字「${q.trim()}」）` : ''}</p>
+          <p className="hint">共 {data.total} 筆（關鍵字「{searched}」）</p>
           {data.items.length === 0 ? (
-            <div className="card empty">{q.trim() ? '書單裡沒有符合的書。' : '書單還是空的。'}</div>
+            <div className="card empty">書單裡沒有符合的書。</div>
           ) : (
             // ⭐ 清單只放書名、作者、出版社、價格；其他資料按「詳細內容」用彈窗看
             <ul className="catalog">
@@ -187,9 +191,9 @@ function CatalogView() {
           )}
           {pages > 1 && (
             <div className="pager">
-              <button disabled={busy || page <= 1} onClick={() => load(q, page - 1)}>上一頁</button>
+              <button disabled={busy || page <= 1} onClick={() => load(searched, page - 1)}>上一頁</button>
               <span>{page} / {pages}</span>
-              <button disabled={busy || page >= pages} onClick={() => load(q, page + 1)}>下一頁</button>
+              <button disabled={busy || page >= pages} onClick={() => load(searched, page + 1)}>下一頁</button>
             </div>
           )}
         </>
