@@ -542,13 +542,14 @@ export default function Books() {
             <BatchOverlay items={batch} />
           </BarcodeScanner>
         )}
-        <Space wrap style={{ marginTop: 8 }}>
+        {/* ⚠ Space 是 inline-flex，外面一定要包 div，不然寬螢幕會跑到查詢鈕右邊擠在一起 */}
+        <div style={{ marginTop: 8 }}><Space wrap>
           <Checkbox checked={autoAdd} onChange={e => {
             setAutoAdd(e.target.checked)
             try { localStorage.setItem(AUTO_ADD_KEY, e.target.checked ? '1' : '0') } catch { /* 無痕模式等 */ }
           }}>查到後自動加入書單</Checkbox>
           {canScan() && <Button size="small" icon={<ScanOutlined />} onClick={startBatch}>連續掃描（掃到就加入書單）</Button>}
-        </Space>
+        </Space></div>
 
         {batch.length > 0 && !batchScanning && (() => {
           const c = batchCounts(batch)
