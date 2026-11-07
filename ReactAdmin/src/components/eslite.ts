@@ -23,6 +23,7 @@ export interface EsliteBook {
   date?: string
   pages?: number
   listPrice?: number   // 定價
+  salePrice?: number   // 售價（誠品打折後）
   language?: string
   categories: string[]
   description?: string
@@ -112,6 +113,7 @@ export async function fetchEslite(code: string): Promise<EsliteOutcome> {
     const pages = Number.parseInt(spec('pages') ?? '', 10)
     // ⚠ v1 商品 API：final_price＝定價、retail_price＝售價（跟搜尋 API 的命名相反）
     const listPrice = Number(p.final_price)
+    const salePrice = Number(p.retail_price)
 
     return {
       book: {
@@ -124,6 +126,7 @@ export async function fetchEslite(code: string): Promise<EsliteOutcome> {
         date: nonEmpty(p.manufacturer_date)?.slice(0, 10),
         pages: Number.isFinite(pages) && pages > 0 ? pages : undefined,
         listPrice: Number.isFinite(listPrice) && listPrice > 0 ? listPrice : undefined,
+        salePrice: Number.isFinite(salePrice) && salePrice > 0 ? salePrice : undefined,
         language: spec('language'),
         // 第二層常是促銷標籤（例：「📌文學館79折起」），濾掉
         categories: [p.level1_name, p.level2_name, p.level3_name]
@@ -159,6 +162,7 @@ interface InfoLike {
   date?: string | null
   pages?: number | null
   price?: string | null
+  salePrice?: string | null
   categories: string[]
   language?: string | null
   description?: string | null
@@ -204,6 +208,7 @@ export function mergeEslite<I extends InfoLike, R extends ResultLike<I>>(result:
   }) as I
   const common = {
     price: e.listPrice ? `NT$${e.listPrice}` : base.price,
+    salePrice: e.salePrice ? `NT$${e.salePrice}` : base.salePrice,
     categories: e.categories.length ? e.categories : base.categories,
     covers: e.cover ? [e.cover, ...base.covers.filter(c => c !== e.cover)] : base.covers,
     sources: [NAME, ...base.sources.filter(s => s !== NAME)],

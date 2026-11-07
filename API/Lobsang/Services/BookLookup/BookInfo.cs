@@ -19,6 +19,8 @@ namespace Lobsang.Services.BookLookup
         public string? Edition { get; set; }
         public int? Pages { get; set; }
         public string? Price { get; set; }
+        /// <summary>售價（打折後）。目前只有誠品線上有，由前端在瀏覽器查到後填入（2026-11-07）</summary>
+        public string? SalePrice { get; set; }
         public List<string> Categories { get; set; } = [];
         public string? Language { get; set; }
         public string? Description { get; set; }

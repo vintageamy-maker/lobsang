@@ -124,10 +124,7 @@ function LookupView({ initial }: { initial: string }) {
         />
       )}
       {detailOpen && r?.info && (
-        <DetailModal info={r.info} onClose={() => setDetailOpen(false)}>
-          <StatusChips statuses={r.statuses} />
-          <Links title="其他網站：" links={r.links} />
-        </DetailModal>
+        <DetailModal info={r.info} onClose={() => setDetailOpen(false)} />
       )}
 
       {r && !r.error && !r.card && !r.found && (
@@ -229,8 +226,11 @@ function BookSummary({ title, authors, publisher, price, authorLabel = '作者',
   )
 }
 
-/** 書的全部資料（彈窗）。按背景、「關閉」或 Esc 都會關。children 接在資料下面（例如查詢來源、其他網站連結）。 */
-function DetailModal({ info, onClose, children }: { info: BookInfo; onClose: () => void; children?: ReactNode }) {
+/**
+ * 書的全部資料（彈窗）。按背景、右上 ✕、「關閉」或 Esc 都會關。
+ * ⭐ 外框照後台 antd Modal：標題列「詳細資料」＋右上 ✕、關閉鈕在右下。查詢來源、其他網站不放（業主 2026-11-07 決定）
+ */
+function DetailModal({ info, onClose }: { info: BookInfo; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -246,7 +246,11 @@ function DetailModal({ info, onClose, children }: { info: BookInfo; onClose: () 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div ref={boxRef} tabIndex={-1} className="modal" role="dialog" aria-modal="true" aria-label={`「${info.title ?? ''}」的詳細內容`} onClick={e => e.stopPropagation()}>
-        <BookDetail info={info}>{children}</BookDetail>
+        <div className="modal-head">
+          <span>詳細資料</span>
+          <button type="button" className="modal-x" aria-label="關閉" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body"><BookDetail info={info} /></div>
         <div className="modal-foot"><button className="btn-primary" onClick={onClose}>關閉</button></div>
       </div>
     </div>

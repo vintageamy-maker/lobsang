@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Lobsang.Data;
 
 namespace Lobsang.Services.BookLookup
 {
@@ -13,7 +15,7 @@ namespace Lobsang.Services.BookLookup
     ///
     /// 來源：
     ///   書　台灣書（978-957／986／626）國圖書號中心 → Google Books → Open Library
-    ///   　　日本書（978-4）openBD → Google Books → Open Library
+    ///   　　日本書（978-4）openBD（先查本機 openbd_books，沒有才線上）→ Google Books → Open Library
     ///   　　其他　Google Books → Open Library
     ///   商品　Open Food／Beauty／Products／Pet Food Facts、UPCitemdb（免費試用，每天約 100 次）
     /// 合併規則：每個欄位依上面的順序，取第一個有值的來源。
@@ -22,7 +24,7 @@ namespace Lobsang.Services.BookLookup
     ///   （國圖、UPCitemdb 都有被擋或額度的風險）。
     /// </summary>
     public class BookLookupService(IHttpClientFactory httpFactory, IConfiguration config, IMemoryCache cache,
-                                   ILogger<BookLookupService> logger)
+                                   ILogger<BookLookupService> logger, AppDbContext db)
     {
         public const string HttpClientName = "booklookup";
         const string NclBase = "https://isbn.ncl.edu.tw/NEW_ISBNNet/";
@@ -64,7 +66,7 @@ namespace Lobsang.Services.BookLookup
             var region = CodeParser.RegionOf(isbn);
             var sources = region switch
             {
-                "jp" => new (string Name, Func<Task<BookInfo?>> Fn)[] { ("openBD", () => FromOpenBD(isbn, ct)), ("Google Books", () => FromGoogle(isbn, ct)), ("Open Library", () => FromOpenLibrary(isbn, ct)) },
+                "jp" => new (string Name, Func<Task<BookInfo?>> Fn)[] { ("openBD", () => FromOpenBdLocalThenOnline(isbn, ct)),("Google Books", () => FromGoogle(isbn, ct)), ("Open Library", () => FromOpenLibrary(isbn, ct)) },
                 "tw" => [("國圖書號中心", () => FromNcl(isbn, ct)), ("Google Books", () => FromGoogle(isbn, ct)), ("Open Library", () => FromOpenLibrary(isbn, ct))],
                 _ => [("Google Books", () => FromGoogle(isbn, ct)), ("Open Library", () => FromOpenLibrary(isbn, ct))],
             };
@@ -118,6 +120,65 @@ namespace Lobsang.Services.BookLookup
                 _ => ["amz", "gb", "ol", "books", "eslite"],
             };
             return order.Select(k => all[k]).ToList();
+        }
+
+        /// <summary>
+        /// openBD：先查自己資料庫的 <c>openbd_books</c>（EliteCrawler 整批匯入，約 195 萬筆），沒有才線上問 openBD。
+        /// ⭐ 2026-11-07 業主決定：日本書改查本機資料，比較快、也不怕 openBD 連不上。
+        /// ⚠ 這張表不在 EF migration 裡（見知識庫 03「資料庫裡別的程式建的表」）：表不存在或查詢出錯時不能讓查書失敗，直接改走線上。
+        /// ⚠ 匯入之後才出版的新書本機沒有，所以一定要保留線上這條路。
+        /// </summary>
+        async Task<BookInfo?> FromOpenBdLocalThenOnline(string isbn, CancellationToken ct)
+        {
+            try
+            {
+                // ⚠ 欄位名稱不要取別名：專案的 EF 設定會把屬性名轉成蛇形（CoverUrl → cover_url）再對欄位
+                var row = await db.Database.SqlQuery<OpenBdRow>($"""
+                    SELECT title, volume, series, authors, publisher, pub_date, price, pages, cover_url, description, toc
+                    FROM openbd_books WHERE isbn13 = {isbn}
+                    """).FirstOrDefaultAsync(ct);
+                if (row is not null)
+                {
+                    var title = string.Join(" ", new[] { row.Title, row.Volume }.Where(v => !string.IsNullOrWhiteSpace(v)));
+                    return new BookInfo
+                    {
+                        Sources = ["openBD"],
+                        Title = NullIfEmpty(title),
+                        Subtitle = NullIfEmpty(row.Series),
+                        // 本機存的是「夏目,漱石,1867-1916」（逗號後沒空格），補空格跟線上 openBD 顯示一致
+                        Authors = string.IsNullOrWhiteSpace(row.Authors) ? [] : [Regex.Replace(row.Authors.Trim(), @",\s*", ", ")],
+                        Publisher = NullIfEmpty(row.Publisher),
+                        Date = FmtDate(NullIfEmpty(row.PubDate)),
+                        Pages = row.Pages is > 0 ? row.Pages : null,
+                        Price = row.Price is > 0 ? $"{row.Price.Value.ToString("#,0", CultureInfo.InvariantCulture)} JPY" : null,
+                        Language = "日文",
+                        Description = NullIfEmpty(row.Description),
+                        Toc = NullIfEmpty(row.Toc),
+                        Covers = string.IsNullOrWhiteSpace(row.CoverUrl) ? [] : [row.CoverUrl.Trim()],
+                    };
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "查本機 openbd_books 失敗，改查線上 openBD（{Isbn}）", isbn);
+            }
+            return await FromOpenBD(isbn, ct);
+        }
+
+        /// <summary>openbd_books 一列（只拿查書要用的欄位）</summary>
+        sealed class OpenBdRow
+        {
+            public string? Title { get; set; }
+            public string? Volume { get; set; }
+            public string? Series { get; set; }
+            public string? Authors { get; set; }
+            public string? Publisher { get; set; }
+            public string? PubDate { get; set; }
+            public int? Price { get; set; }
+            public int? Pages { get; set; }
+            public string? CoverUrl { get; set; }
+            public string? Description { get; set; }
+            public string? Toc { get; set; }
         }
 
         async Task<BookInfo?> FromOpenBD(string isbn, CancellationToken ct)

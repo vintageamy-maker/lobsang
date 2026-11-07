@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, Grid,
-  Form, Radio, Select, DatePicker, type InputRef,
+  Form, Radio, Select, DatePicker, Collapse, type InputRef,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, ScanOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
@@ -31,6 +31,7 @@ interface BookInfo {
   edition?: string | null
   pages?: number | null
   price?: string | null
+  salePrice?: string | null   // 售價（目前只有誠品有）
   categories: string[]
   language?: string | null
   description?: string | null
@@ -165,6 +166,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'pages', label: '頁數', width: 7, get: b => b.info?.pages },
   { key: 'quantity', label: '規格／容量', width: 14, get: b => b.info?.quantity },
   { key: 'price', label: '定價', common: true, width: 12, get: b => b.info?.price },
+  { key: 'salePrice', label: '售價', common: true, width: 12, get: b => b.info?.salePrice },
   { key: 'language', label: '語言', width: 8, get: b => b.info?.language },
   { key: 'categories', label: '分類', width: 20, get: b => b.info?.categories?.join('、') },
   { key: 'region', label: '產地／條碼註冊地', width: 16, get: b => (b.kind === 'product' ? b.info?.gs1 : b.info?.regionLabel) },
@@ -279,17 +281,23 @@ function Cover({ covers, width, fixed }: { covers: string[]; width: number; fixe
 
 function infoItems(b: BookInfo) {
   const rows: [string, string | null | undefined][] = b.kind === 'product'
-    ? [['品牌', b.brand], ['規格', b.quantity], ['分類', b.categories.join('、')], ['銷售地區', b.countries],
+    ? [['品牌', b.brand], ['規格', b.quantity], ['定價', b.price], ['售價', b.salePrice], ['分類', b.categories.join('、')], ['銷售地區', b.countries],
        ['條碼註冊地', b.gs1], ['條碼', b.code], ['資料來源', b.sources.join('、')]]
     : [['作者', b.authors.join('、')], ['出版社', b.publisher], ['出版日期', b.date], ['版次', b.edition],
-       ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['語言', b.language],
+       ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['售價', b.salePrice], ['語言', b.language],
        ['分類', b.categories.join('、')], ['ISBN-13', b.code], ['ISBN-10', b.isbn10],
        ['產地判斷', b.regionLabel], ['資料來源', b.sources.join('、')]]
   return rows.filter(r => r[1]).map(([k, v]) => ({ key: k, label: k, children: v }))
 }
 
 function BookDetail({ info }: { info: BookInfo }) {
+  // 目次、成分可點開（2026-11-07 補上，跟公開頁一致）
+  const more = [
+    ...(info.ingredients ? [{ key: 'ing', label: '成分', children: <div style={{ whiteSpace: 'pre-wrap' }}>{info.ingredients}</div> }] : []),
+    ...(info.toc ? [{ key: 'toc', label: '目次', children: <div style={{ whiteSpace: 'pre-wrap' }}>{info.toc.replace(/^目次\s*/, '')}</div> }] : []),
+  ]
   return (
+    <>
     <Space align="start" size={20} style={{ width: '100%' }} wrap>
       <Cover covers={info.covers} width={120} />
       <div style={{ flex: 1, minWidth: 260 }}>
@@ -303,6 +311,8 @@ function BookDetail({ info }: { info: BookInfo }) {
         )}
       </div>
     </Space>
+    {more.length > 0 && <Collapse ghost size="small" style={{ marginTop: 8 }} items={more} />}
+    </>
   )
 }
 
@@ -643,7 +653,7 @@ export default function Books() {
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
         {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1260 }}
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1350 }}
           pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: p => load(q, p), size: isNarrow ? 'small' : undefined }}
           columns={isNarrow ? [
             { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
@@ -659,6 +669,7 @@ export default function Books() {
                   )}
                   <div style={{ fontSize: 12 }}>
                     {r.info?.price && <Typography.Text strong style={{ marginRight: 8 }}>{r.info.price}</Typography.Text>}
+                    {r.info?.salePrice && <Typography.Text style={{ marginRight: 8 }}>售價 {r.info.salePrice}</Typography.Text>}
                     <Typography.Text type="secondary" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{r.code}</Typography.Text>
                   </div>
                   {r.note && <Typography.Text type="secondary" ellipsis style={{ fontSize: 12, display: 'block' }}>備註：{r.note}</Typography.Text>}
@@ -675,6 +686,8 @@ export default function Books() {
             { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
             { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
             { title: '定價', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
+            // 售價目前只有誠品有（2026-11-07 起查書才會存；之前加入的書要重查才有）
+            { title: '售價', key: 'salePrice', width: 90, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.salePrice ?? ''}>{r.info?.salePrice ?? ''}</span> },
             { title: 'ISBN／條碼', dataIndex: 'code', width: 140, ellipsis: true },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
             { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },

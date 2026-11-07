@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BookInfo, LinkItem, SourceStatus } from './books'
 
 /** 封面：依序試每一張，載入失敗或是 1x1 的空圖就換下一張 */
@@ -48,7 +48,7 @@ export function Links({ title, links }: { title: string; links: LinkItem[] }) {
 function rowsOf(b: BookInfo): [string, string | null | undefined][] {
   if (b.kind === 'product') {
     return [
-      ['品牌', b.brand], ['規格', b.quantity], ['分類', b.categories.join('、')],
+      ['品牌', b.brand], ['規格', b.quantity], ['定價', b.price], ['分類', b.categories.join('、')],
       ['銷售地區', b.countries], ['條碼註冊地', b.gs1 ? `${b.gs1}（廠商申請條碼的地方，不一定是產地）` : null],
       ['條碼', b.code], ['資料來源', b.sources.join('、')],
     ]
@@ -61,26 +61,45 @@ function rowsOf(b: BookInfo): [string, string | null | undefined][] {
   ]
 }
 
-/** 一本書／一個商品的詳細資料 */
-export function BookDetail({ info, badge, children }: { info: BookInfo; badge?: ReactNode; children?: ReactNode }) {
+/**
+ * 一本書／一個商品的詳細資料（放在「詳細內容」彈窗裡）。
+ * ⭐ 2026-11-07 業主要求：版面照後台「詳細資料」彈窗——左邊小封面，右邊書名＋一行一項資料，
+ *    簡介先顯示 3 行（按「展開」看全部），目次、成分可點開。查詢來源、其他網站連結不放。
+ */
+export function BookDetail({ info }: { info: BookInfo }) {
   const rows = rowsOf(info).filter((r): r is [string, string] => !!r[1])
   return (
-    <div className="card">
-      <div className="book">
-        <Cover covers={info.covers} />
-        <div className="book-main">
-          {badge}
-          <h2>{info.title || (info.kind === 'product' ? '（無名稱）' : '（無書名）')}</h2>
-          {info.subtitle && <div className="subtitle">{info.subtitle}</div>}
-          <dl className="info">
+    <div className="dt">
+      <div className="dt-top">
+        <div className="dt-cover"><Cover covers={info.covers} /></div>
+        <div className="dt-main">
+          <h3 className="dt-title">{info.title || (info.kind === 'product' ? '（無名稱）' : '（無書名）')}</h3>
+          {info.subtitle && <div className="dt-sub">{info.subtitle}</div>}
+          <dl className="dt-rows">
             {rows.map(([k, v]) => [<dt key={k + 't'}>{k}</dt>, <dd key={k + 'd'}>{v}</dd>])}
           </dl>
-          {children}
+          {info.description && <Clamp text={info.description} />}
         </div>
       </div>
-      {info.description && <div className="desc">{info.description}</div>}
-      {info.ingredients && <details className="desc"><summary>成分</summary>{info.ingredients}</details>}
-      {info.toc && <details className="desc"><summary>目次</summary>{info.toc.replace(/^目次\s*/, '')}</details>}
+      {info.ingredients && <details className="dt-more"><summary>成分</summary><div>{info.ingredients}</div></details>}
+      {info.toc && <details className="dt-more"><summary>目次</summary><div>{info.toc.replace(/^目次\s*/, '')}</div></details>}
+    </div>
+  )
+}
+
+/** 長文字先顯示 3 行，超過才出現「展開」（跟後台 antd 的 ellipsis expandable 一樣） */
+function Clamp({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [overflow, setOverflow] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && !open) setOverflow(el.scrollHeight > el.clientHeight + 1)
+  }, [text, open])
+  return (
+    <div className="dt-desc">
+      <div ref={ref} className={open ? '' : 'dt-clamp'}>{text}</div>
+      {overflow && !open && <button type="button" className="dt-link" onClick={() => setOpen(true)}>展開</button>}
     </div>
   )
 }

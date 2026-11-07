@@ -123,8 +123,34 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
   position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, .55);
   display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto;
 }
-.modal { width: 100%; max-width: 760px; outline: none; }
-.modal-foot { display: flex; justify-content: center; margin-top: 12px; }
+/* 詳細資料彈窗：外觀照後台 antd Modal（2026-11-07） */
+.modal {
+  width: 100%; max-width: 720px; outline: none; background: #fff; border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08), 0 9px 28px 8px rgba(0,0,0,.05);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px 8px; font-size: 16px; font-weight: 600; color: #0f172a; }
+.modal-x { border: none; background: none; padding: 4px 8px; font-size: 16px; color: #94a3b8; line-height: 1; }
+.modal-x:hover { color: #0f172a; background: #f1f5f9; }
+.modal-body { padding: 8px 24px; }
+.modal-foot { display: flex; justify-content: flex-end; padding: 12px 24px 20px; }
+.modal-foot .btn-primary { padding: 7px 18px; font-weight: 600; }
+
+.dt-top { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.dt-cover .cover { width: 120px; min-height: 162px; border-radius: 4px; }
+.dt-main { flex: 1; min-width: 260px; }
+.dt-title { font-size: 20px; font-weight: 600; line-height: 1.4; color: #0f172a; margin-bottom: 4px; }
+.dt-sub { color: #64748b; font-size: 14px; }
+.dt-rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 0; font-size: 14px; margin-top: 8px; }
+.dt-rows dt { color: #64748b; }
+.dt-rows dt::after { content: '：'; }
+.dt-rows dd { color: #0f172a; word-break: break-word; }
+.dt-desc { margin-top: 8px; font-size: 14px; line-height: 1.6; color: #64748b; white-space: pre-wrap; }
+.dt-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dt-link { border: none; background: none; padding: 0; font-size: 14px; color: #d97706; }
+.dt-link:hover { color: #b45309; }
+.dt-more { margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; font-size: 14px; }
+.dt-more summary { cursor: pointer; font-weight: 600; color: #475569; }
+.dt-more > div { margin-top: 6px; white-space: pre-wrap; line-height: 1.7; color: #334155; }
 .catalog-text strong { font-size: 15px; color: #0f172a; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .catalog-text .price { color: #b45309; margin-right: 8px; }
