@@ -170,7 +170,10 @@ function CatalogView() {
                     <span className="catalog-text">
                       <strong>{b.title}</strong>
                       <span>{[b.authors, b.publisher, b.pubDate].filter(Boolean).join(' ・ ')}</span>
-                      <span className="mono">{b.code}</span>
+                      <span>
+                        {b.info?.price && <b className="price">{b.info.price}</b>}
+                        <span className="mono">{b.code}</span>
+                      </span>
                     </span>
                   </button>
                 </li>

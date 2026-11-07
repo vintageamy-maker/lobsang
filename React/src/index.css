@@ -119,6 +119,7 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
 .catalog-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; color: #64748b; }
 .catalog-text strong { font-size: 15px; color: #0f172a; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
+.catalog-text .price { color: #b45309; margin-right: 8px; }
 .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 16px; font-size: 14px; }
 .back { margin-bottom: 4px; }
 

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, type InputRef,
+  Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, Grid,
+  Form, Radio, Select, DatePicker, type InputRef,
 } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
@@ -67,6 +69,136 @@ interface BookRow {
 }
 
 const AUTO_ADD_KEY = 'lobsang_books_auto_add'
+
+/** 伺服器回的時間是 UTC 但不帶 Z（後台各頁的慣例），補上再轉本地時間 */
+function localDate(s: string) {
+  return dayjs(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s + 'Z')
+}
+
+interface ExportFilter {
+  keyword: string
+  kind: 'all' | 'book' | 'product'
+  regions: string[]          // 產地判斷（台灣書、日本書…）；空＝全部
+  dates: [Dayjs, Dayjs] | null // 加入日期（含頭尾兩天）
+  note: 'all' | 'with' | 'without'
+}
+const EMPTY_FILTER: ExportFilter = { keyword: '', kind: 'all', regions: [], dates: null, note: 'all' }
+
+/**
+ * 匯出可選的欄位（順序＝檔案欄位順序）。common＝「常用」快速選取會勾的欄位；
+ * code＝條碼類（CSV 用 ="..." 包、Excel 存成文字，避免變成科學記號或吃掉開頭的 0）；width＝Excel 欄寬（字元數）
+ */
+interface ExportColumn { key: string; label: string; common?: boolean; code?: boolean; width?: number; get: (b: BookRow) => unknown }
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'code', label: 'ISBN／條碼', common: true, code: true, width: 16, get: b => b.code },
+  { key: 'isbn10', label: 'ISBN-10', code: true, width: 13, get: b => b.info?.isbn10 },
+  { key: 'kind', label: '類型', common: true, width: 7, get: b => (b.kind === 'product' ? '商品' : '書') },
+  { key: 'title', label: '名稱', common: true, width: 36, get: b => b.title },
+  { key: 'subtitle', label: '副標題', width: 28, get: b => b.info?.subtitle },
+  { key: 'authors', label: '作者／品牌', common: true, width: 28, get: b => b.authors },
+  { key: 'publisher', label: '出版社', common: true, width: 18, get: b => (b.kind === 'product' ? '' : b.publisher) },
+  { key: 'pubDate', label: '出版日期', common: true, width: 11, get: b => b.pubDate },
+  { key: 'edition', label: '版次', width: 12, get: b => b.info?.edition },
+  { key: 'pages', label: '頁數', width: 7, get: b => b.info?.pages },
+  { key: 'quantity', label: '規格／容量', width: 14, get: b => b.info?.quantity },
+  { key: 'price', label: '價格', common: true, width: 12, get: b => b.info?.price },
+  { key: 'language', label: '語言', width: 8, get: b => b.info?.language },
+  { key: 'categories', label: '分類', width: 20, get: b => b.info?.categories?.join('、') },
+  { key: 'region', label: '產地／條碼註冊地', width: 16, get: b => (b.kind === 'product' ? b.info?.gs1 : b.info?.regionLabel) },
+  { key: 'sources', label: '資料來源', width: 24, get: b => b.info?.sources?.join('、') },
+  { key: 'description', label: '簡介／說明', width: 50, get: b => b.info?.description },
+  { key: 'toc', label: '目次', width: 40, get: b => b.info?.toc },
+  { key: 'ingredients', label: '成分', width: 30, get: b => b.info?.ingredients },
+  { key: 'cover', label: '圖片網址', width: 40, get: b => b.info?.covers?.[0] },
+  { key: 'note', label: '備註', common: true, width: 30, get: b => b.note },
+  { key: 'createdAt', label: '加入日期', common: true, width: 12, get: b => localDate(b.createdAt).format('YYYY-MM-DD') },
+]
+const ALL_COLS = EXPORT_COLUMNS.map(c => c.key)
+const COMMON_COLS = EXPORT_COLUMNS.filter(c => c.common).map(c => c.key)
+const EXPORT_COLS_KEY = 'lobsang_books_export_cols'
+const EXPORT_FORMAT_KEY = 'lobsang_books_export_format'
+const EXPORT_FONT = '微軟正黑體'   // = Microsoft JhengHei
+const ROW_HEIGHT = 16             // 匯出 Excel 的列高（點），業主指定固定 16
+
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = name
+  document.body.append(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+/** CSV 是純文字，存不了字型和顏色（Excel 開啟時一律用它的預設字型） */
+function buildCsv(cols: ExportColumn[], items: BookRow[]): Blob {
+  const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+  const cell = (c: ExportColumn, b: BookRow) => { const v = c.get(b); return c.code && v ? `="${v}"` : v }
+  const csv = '﻿' + [cols.map(c => c.label), ...items.map(b => cols.map(c => cell(c, b)))]
+    .map(l => l.map(esc).join(',')).join('\r\n')
+  return new Blob([csv], { type: 'text/csv;charset=utf-8' })
+}
+
+/**
+ * Excel：全部微軟正黑體；標題列黑底白字粗體置中、凍結在最上面；每列列高固定 16；條碼存成文字。
+ * ⭐ exceljs 約 1 MB，按匯出才載入（import()），平常開書單頁不用下載。
+ */
+async function buildXlsx(cols: ExportColumn[], items: BookRow[]): Promise<Blob> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('書單', { views: [{ state: 'frozen', ySplit: 1 }], properties: { defaultRowHeight: ROW_HEIGHT } })
+  ws.columns = cols.map(c => ({ header: c.label, key: c.key, width: c.width ?? 14 }))
+  for (const b of items) {
+    ws.addRow(Object.fromEntries(cols.map(c => {
+      const v = c.get(b)
+      return [c.key, v == null || v === '' ? null : c.code ? String(v) : v]
+    })))
+  }
+  ws.eachRow({ includeEmpty: true }, (row, n) => {
+    row.eachCell({ includeEmpty: true }, (cell, colNo) => {
+      if (n === 1) {
+        cell.font = { name: EXPORT_FONT, bold: true, color: { argb: 'FFFFFFFF' } }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } }
+        cell.alignment = { vertical: 'middle', horizontal: 'center' }   // 標題置中（業主指定）
+      } else {
+        cell.font = { name: EXPORT_FONT }
+        // ⚠ 列高固定，不自動換行（換行的話長文字只會露出一部分，反而難讀）
+        cell.alignment = { vertical: 'middle' }
+        if (cols[colNo - 1]?.code) cell.numFmt = '@'
+      }
+    })
+  })
+  ws.eachRow({ includeEmpty: true }, row => { row.height = ROW_HEIGHT })
+  const buf = await wb.xlsx.writeBuffer()
+  return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+/** 上次勾的欄位（記在這台瀏覽器）；沒有或壞掉就用全部欄位（跟改版前一樣） */
+function loadExportCols(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(EXPORT_COLS_KEY) ?? 'null')
+    if (Array.isArray(v)) { const ok = ALL_COLS.filter(k => v.includes(k)); if (ok.length) return ok }
+  } catch { /* 無痕模式等 */ }
+  return ALL_COLS
+}
+
+function applyExportFilter(rows: BookRow[], f: ExportFilter): BookRow[] {
+  // 關鍵字規則與書單搜尋（後端 BookQueries.Filter）一致：空白分開＝每個字都要符合；後台多比對備註
+  const words = f.keyword.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return rows.filter(b => {
+    if (f.kind !== 'all' && b.kind !== f.kind) return false
+    if (f.regions.length && !(b.kind !== 'product' && f.regions.includes(b.info?.regionLabel ?? ''))) return false
+    if (f.note === 'with' && !b.note?.trim()) return false
+    if (f.note === 'without' && b.note?.trim()) return false
+    if (f.dates) {
+      const d = localDate(b.createdAt)
+      if (d.isBefore(f.dates[0].startOf('day')) || d.isAfter(f.dates[1].endOf('day'))) return false
+    }
+    if (words.length) {
+      const hay = [b.title, b.authors, b.publisher, b.note].map(v => (v ?? '').toLowerCase())
+      const code = b.code.toLowerCase()
+      if (!words.every(w => code.includes(w.replace(/-/g, '')) || hay.some(h => h.includes(w)))) return false
+    }
+    return true
+  })
+}
 
 function Cover({ covers, width }: { covers: string[]; width: number }) {
   const [i, setI] = useState(0)
@@ -140,6 +272,7 @@ export default function Books() {
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<BookRow | null>(null)
   const [editNote, setEditNote] = useState('')
+  const [viewing, setViewing] = useState<BookRow | null>(null)
 
   const load = useCallback(async (query: string, p: number) => {
     setLoading(true)
@@ -209,30 +342,72 @@ export default function Books() {
     }
   }
 
-  const exportCsv = async () => {
+  // ---------- 匯出（先篩選再匯出） ----------
+  // ⭐ 篩選在前端做：書單量不大，一次抓全部（pageSize=0）再篩，篩選條件改了筆數馬上更新，不用每次問伺服器
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportAll, setExportAll] = useState<BookRow[] | null>(null)
+  const [exportFilter, setExportFilter] = useState<ExportFilter>(EMPTY_FILTER)
+
+  const openExport = async () => {
+    setExportFilter({ ...EMPTY_FILTER, keyword: q })
+    setExportAll(null)
+    setExportOpen(true)
     try {
-      const r = await api.get<{ items: BookRow[] }>(`/api/admin/books?q=${encodeURIComponent(q)}&pageSize=0`)
-      const head = ['ISBN／條碼', 'ISBN-10', '類型', '名稱', '副標題', '作者／品牌', '出版社', '出版日期', '版次', '頁數',
-        '規格／容量', '價格', '語言', '分類', '產地／條碼註冊地', '資料來源', '簡介／說明', '目次', '成分', '圖片網址', '備註', '加入日期']
-      const lines = r.items.map(b => {
-        const i = b.info, isP = b.kind === 'product'
-        // 條碼用 ="..." 包起來，避免 Excel 變成科學記號或吃掉開頭的 0
-        return [`="${b.code}"`, i?.isbn10 ? `="${i.isbn10}"` : '', isP ? '商品' : '書', b.title, i?.subtitle,
-          b.authors, isP ? '' : b.publisher, b.pubDate, i?.edition, i?.pages, i?.quantity, i?.price, i?.language,
-          i?.categories?.join('、'), isP ? i?.gs1 : i?.regionLabel, i?.sources?.join('、'), i?.description, i?.toc,
-          i?.ingredients, i?.covers?.[0], b.note, b.createdAt.slice(0, 10)]
-      })
-      const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
-      const csv = '\uFEFF' + [head, ...lines].map(l => l.map(esc).join(',')).join('\r\n')
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-      const a = document.createElement('a')
-      a.href = url; a.download = `書單_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.append(a); a.click(); a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 2000)
+      const r = await api.get<{ items: BookRow[] }>('/api/admin/books?pageSize=0')
+      setExportAll(r.items)
     } catch (e) {
-      message.error(e instanceof ApiError ? e.message : '匯出失敗')
+      message.error(e instanceof ApiError ? e.message : '讀取書單失敗')
+      setExportOpen(false)
     }
   }
+  const exportRows = exportAll ? applyExportFilter(exportAll, exportFilter) : []
+
+  const [exportCols, setExportCols] = useState<string[]>(loadExportCols)
+  const changeExportCols = (keys: string[]) => {
+    // 保持欄位原本的順序（不照勾選的先後）
+    const ordered = EXPORT_COLUMNS.map(c => c.key).filter(k => keys.includes(k))
+    setExportCols(ordered)
+    try { localStorage.setItem(EXPORT_COLS_KEY, JSON.stringify(ordered)) } catch { /* 無痕模式等 */ }
+  }
+
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv'>(() => {
+    try { return localStorage.getItem(EXPORT_FORMAT_KEY) === 'csv' ? 'csv' : 'xlsx' } catch { return 'xlsx' }
+  })
+  const [exporting, setExporting] = useState(false)
+
+  const exportFile = async (items: BookRow[]) => {
+    const cols = EXPORT_COLUMNS.filter(c => exportCols.includes(c.key))
+    const name = `書單_${dayjs().format('YYYY-MM-DD')}`
+    setExporting(true)
+    try {
+      if (exportFormat === 'xlsx') downloadBlob(await buildXlsx(cols, items), `${name}.xlsx`)
+      else downloadBlob(buildCsv(cols, items), `${name}.csv`)
+      message.success(`已匯出 ${items.length} 筆`)
+      setExportOpen(false)
+    } catch {
+      message.error('匯出失敗')
+    } finally {
+      setExporting(false)
+    }
+  }
+  const regionOptions = [...new Set((exportAll ?? []).filter(b => b.kind !== 'product').map(b => b.info?.regionLabel).filter((v): v is string => !!v))]
+
+  // 手機直式（< 768px）用精簡版書單
+  const screens = Grid.useBreakpoint()
+  const isNarrow = !screens.md
+  const coverCell = (r: BookRow) => (
+    <a onClick={() => setViewing(r)} aria-label={`看「${r.title}」的詳細資料`}><Cover covers={r.info?.covers ?? []} width={36} /></a>
+  )
+  const opCell = (r: BookRow, compact: boolean) => (
+    <Space size={4} direction={compact ? 'vertical' : 'horizontal'}>
+      <Button size="small" icon={<EditOutlined />} aria-label="備註" onClick={() => { setEditing(r); setEditNote(r.note ?? '') }}>
+        {compact ? null : '備註'}
+      </Button>
+      <Popconfirm title={`從書單移除「${r.title}」？`} okText="移除" cancelText="取消" onConfirm={() => remove(r)}>
+        <Button size="small" danger icon={<DeleteOutlined />} aria-label="移除" />
+      </Popconfirm>
+    </Space>
+  )
 
   const res = lookup?.result
   const canAdd = !!res && res.found && !!res.info && (res.kind === 'book' || res.kind === 'product')
@@ -248,7 +423,7 @@ export default function Books() {
         <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
           <Input ref={inputRef} value={code} onChange={e => setCode(e.target.value)} onPressEnter={() => runLookup()}
             placeholder="ISBN 或商品條碼，例如 9786264186421" inputMode="numeric" autoFocus allowClear />
-          {canScan() && <Button icon={<CameraOutlined />} onClick={() => setScanning(true)}>掃描</Button>}
+          {canScan() && <Button icon={<CameraOutlined />} aria-label="用相機掃條碼" onClick={() => setScanning(true)}>{isNarrow ? null : '掃描'}</Button>}
           <Button type="primary" icon={<SearchOutlined />} loading={looking} onClick={() => runLookup()}>查詢</Button>
         </Space.Compact>
         {scanning && (
@@ -304,38 +479,136 @@ export default function Books() {
 
       <Card title={`書單（${total} 筆）`} extra={
         <Space>
-          <Button icon={<DownloadOutlined />} onClick={exportCsv} disabled={!total}>匯出 CSV</Button>
+          <Button icon={<DownloadOutlined />} onClick={openExport} disabled={!total}>匯出</Button>
           <Button icon={<ReloadOutlined />} onClick={() => load(q, page)} />
         </Space>
       }>
         <Input.Search value={q} onChange={e => setQ(e.target.value)} onSearch={v => load(v, 1)} allowClear
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
+        {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={{ x: 900 }}
-          pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: p => load(q, p) }}
-          expandable={{ expandedRowRender: r => r.info ? <BookDetail info={r.info} /> : null, rowExpandable: r => !!r.info }}
-          columns={[
-            { title: '', key: 'cover', width: 52, render: (_, r) => <Cover covers={r.info?.covers ?? []} width={36} /> },
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1230 }}
+          pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: p => load(q, p), size: isNarrow ? 'small' : undefined }}
+          columns={isNarrow ? [
+            { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
+            {
+              title: '書單', key: 'main', render: (_, r) => (
+                <div style={{ minWidth: 0, lineHeight: 1.5 }}>
+                  <a onClick={() => setViewing(r)} style={{ fontWeight: 600 }}>{r.title}</a>
+                  {r.kind === 'product' && <Tag style={{ marginLeft: 6 }}>商品</Tag>}
+                  {(r.authors || r.publisher || r.pubDate) && (
+                    <div style={{ fontSize: 12, color: 'var(--c-text-secondary, #64748b)' }}>
+                      {[r.authors, r.publisher, r.pubDate].filter(Boolean).join(' ・ ')}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12 }}>
+                    {r.info?.price && <Typography.Text strong style={{ marginRight: 8 }}>{r.info.price}</Typography.Text>}
+                    <Typography.Text type="secondary" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{r.code}</Typography.Text>
+                  </div>
+                  {r.note && <Typography.Text type="secondary" ellipsis style={{ fontSize: 12, display: 'block' }}>備註：{r.note}</Typography.Text>}
+                </div>
+              ),
+            },
+            { title: '', key: 'op', width: 44, render: (_, r) => opCell(r, true) },
+          ] : [
+            { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
             { title: '類型', dataIndex: 'kind', width: 64, render: k => k === 'product' ? <Tag>商品</Tag> : <Tag color="blue">書</Tag> },
-            { title: '名稱', dataIndex: 'title' },
+            { title: '名稱', dataIndex: 'title', width: 220, render: (t: string, r) => <a onClick={() => setViewing(r)}>{t}</a> },
             { title: '作者／品牌', dataIndex: 'authors', width: 160 },
             { title: '出版社／規格', dataIndex: 'publisher', width: 140 },
             { title: '出版日期', dataIndex: 'pubDate', width: 100 },
+            { title: '價格', key: 'price', width: 90, render: (_, r) => r.info?.price ?? '' },
             { title: 'ISBN／條碼', dataIndex: 'code', width: 130 },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
-            {
-              title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => (
-                <Space size={4}>
-                  <Button size="small" icon={<EditOutlined />} onClick={() => { setEditing(r); setEditNote(r.note ?? '') }}>備註</Button>
-                  <Popconfirm title={`從書單移除「${r.title}」？`} okText="移除" cancelText="取消" onConfirm={() => remove(r)}>
-                    <Button size="small" danger icon={<DeleteOutlined />} aria-label="移除" />
-                  </Popconfirm>
-                </Space>
-              ),
-            },
+            { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },
           ]}
         />
       </Card>
+
+      {/* 匯出前篩選（2026-11-07）：條件一改，下方筆數馬上更新；按「匯出」才下載 */}
+      <Modal title="匯出書單" open={exportOpen} onCancel={() => setExportOpen(false)} destroyOnHidden width={520}
+        footer={
+          <Space>
+            <Button onClick={() => setExportFilter(EMPTY_FILTER)}>清除條件</Button>
+            <Button onClick={() => setExportOpen(false)}>取消</Button>
+            <Button type="primary" icon={<DownloadOutlined />} loading={exporting}
+              disabled={!exportAll || exportRows.length === 0 || exportCols.length === 0}
+              onClick={() => exportFile(exportRows)}>匯出 {exportAll ? exportRows.length : ''} 筆</Button>
+          </Space>
+        }>
+        <Form layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item label="關鍵字" extra="比對書名、作者、出版社、ISBN 和備註；空白分開＝每個字都要有">
+            <Input value={exportFilter.keyword} allowClear placeholder="不填＝全部"
+              onChange={e => setExportFilter({ ...exportFilter, keyword: e.target.value })} />
+          </Form.Item>
+          <Form.Item label="類型">
+            <Radio.Group value={exportFilter.kind} optionType="button"
+              onChange={e => setExportFilter({ ...exportFilter, kind: e.target.value })}
+              options={[{ label: '全部', value: 'all' }, { label: '書', value: 'book' }, { label: '商品', value: 'product' }]} />
+          </Form.Item>
+          {regionOptions.length > 1 && exportFilter.kind !== 'product' && (
+            <Form.Item label="產地（書）">
+              <Select mode="multiple" allowClear placeholder="不選＝全部" value={exportFilter.regions}
+                onChange={v => setExportFilter({ ...exportFilter, regions: v })}
+                options={regionOptions.map(r => ({ label: r, value: r }))} />
+            </Form.Item>
+          )}
+          <Form.Item label="加入書單的日期">
+            <DatePicker.RangePicker style={{ width: '100%' }} value={exportFilter.dates} allowEmpty={[false, false]}
+              placeholder={['開始日期', '結束日期']} inputReadOnly={isNarrow}
+              onChange={v => setExportFilter({ ...exportFilter, dates: v && v[0] && v[1] ? [v[0], v[1]] : null })} />
+          </Form.Item>
+          <Form.Item label="備註" style={{ marginBottom: 8 }}>
+            <Radio.Group value={exportFilter.note} optionType="button"
+              onChange={e => setExportFilter({ ...exportFilter, note: e.target.value })}
+              options={[{ label: '全部', value: 'all' }, { label: '有備註', value: 'with' }, { label: '沒有備註', value: 'without' }]} />
+          </Form.Item>
+          <Form.Item label="檔案格式" extra={exportFormat === 'xlsx' ? '微軟正黑體，標題列黑底白字' : 'CSV 是純文字，沒有字型和顏色'}>
+            <Radio.Group value={exportFormat} optionType="button"
+              onChange={e => { setExportFormat(e.target.value); try { localStorage.setItem(EXPORT_FORMAT_KEY, e.target.value) } catch { /* 無痕模式等 */ } }}
+              options={[{ label: 'Excel（.xlsx）', value: 'xlsx' }, { label: 'CSV', value: 'csv' }]} />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 8 }}
+            label={<Space size={8} wrap>
+              <span>匯出欄位（{exportCols.length}／{ALL_COLS.length}）</span>
+              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => changeExportCols(ALL_COLS)}>全選</Button>
+              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => changeExportCols(COMMON_COLS)}>常用</Button>
+              <Button size="small" type="link" style={{ padding: 0 }} onClick={() => changeExportCols([])}>全不選</Button>
+            </Space>}
+            extra="勾選的欄位會記在這台電腦，下次匯出沿用"
+            validateStatus={exportCols.length === 0 ? 'error' : undefined}
+            help={exportCols.length === 0 ? '至少要勾一個欄位' : undefined}>
+            <Checkbox.Group value={exportCols} onChange={v => changeExportCols(v as string[])}
+              style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr 1fr' : '1fr 1fr 1fr', rowGap: 6 }}
+              options={EXPORT_COLUMNS.map(c => ({ label: c.label, value: c.key }))} />
+          </Form.Item>
+        </Form>
+        <Alert type={exportAll && exportRows.length === 0 ? 'warning' : 'info'} showIcon
+          message={!exportAll ? '讀取書單中…'
+            : exportRows.length === 0 ? `沒有符合條件的資料（書單共 ${exportAll.length} 筆）`
+            : `符合條件 ${exportRows.length} 筆（書單共 ${exportAll.length} 筆）`} />
+      </Modal>
+
+      {/* 書單的詳細資料：點封面或書名開啟（2026-11-07 由展開列改成彈窗） */}
+      <Modal title="詳細資料" open={!!viewing} onCancel={() => setViewing(null)} width={720} destroyOnHidden
+        footer={viewing && (
+          <Space>
+            <Button icon={<EditOutlined />} onClick={() => { setEditing(viewing); setEditNote(viewing.note ?? ''); setViewing(null) }}>備註</Button>
+            <Button type="primary" onClick={() => setViewing(null)}>關閉</Button>
+          </Space>
+        )}>
+        {viewing && (
+          <>
+            {viewing.info
+              ? <BookDetail info={viewing.info} />
+              : <Typography.Title level={4} style={{ marginTop: 0 }}>{viewing.title}</Typography.Title>}
+            <Descriptions size="small" column={1} style={{ marginTop: 12 }} items={[
+              { key: 'note', label: '備註', children: viewing.note || <Typography.Text type="secondary">（無）</Typography.Text> },
+              { key: 'created', label: '加入書單', children: new Date(viewing.createdAt + (/[zZ]|[+-]\d\d:?\d\d$/.test(viewing.createdAt) ? '' : 'Z')).toLocaleString('zh-TW', { hour12: false }) },
+            ]} />
+          </>
+        )}
+      </Modal>
 
       <Modal title={editing ? `備註：${editing.title}` : ''} open={!!editing} onOk={saveNote} onCancel={() => setEditing(null)}
         okText="儲存" cancelText="取消" destroyOnHidden>
