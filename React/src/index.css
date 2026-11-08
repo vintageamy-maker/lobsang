@@ -15,7 +15,7 @@ body {
   font-weight: 700; letter-spacing: 2px; font-size: 13px;
   padding: 4px 14px; border-radius: 999px; margin-bottom: 14px;
 }
-.hero h1 { font-size: 32px; font-weight: 900; color: #0f172a; }
+.hero h1 { font-size: 24px; font-weight: 900; color: #0f172a; }
 .hero .sub { margin-top: 8px; color: #64748b; font-size: 15px; }
 
 .status-row { margin-top: 18px; display: flex; gap: 10px; justify-content: center; }
@@ -97,6 +97,8 @@ a { color: #b45309; }
 }
 .cover img { width: 100%; height: auto; display: block; }
 .cover-sm { width: 48px; min-height: 64px; border-radius: 4px; }
+.catalog-cover { flex: none; padding: 0; border: none; background: none; border-radius: 6px; }
+.catalog-cover .cover-sm { width: 64px; min-height: 86px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
 
 .info { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 14px; margin: 10px 0; }
 .info dt { color: #64748b; }
@@ -154,11 +156,12 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
 .catalog-text strong { font-size: 15px; color: #0f172a; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .catalog-text .price { color: #b45309; margin-right: 8px; }
+.catalog-text .stock { margin-left: 12px; }
 .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 16px; font-size: 14px; }
 
 @media (max-width: 560px) {
   .page { padding: 28px 16px; }
-  .hero h1 { font-size: 26px; }
+  .hero h1 { font-size: 20px; }
   .book { flex-direction: column; align-items: center; }
   .book-main { width: 100%; }
   .info { grid-template-columns: 1fr; gap: 0; }

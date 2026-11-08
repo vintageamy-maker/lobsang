@@ -66,8 +66,9 @@ function rowsOf(b: BookInfo): [string, string | null | undefined][] {
  * ⭐ 2026-11-07 業主要求：版面照後台「詳細資料」彈窗——左邊小封面，右邊書名＋一行一項資料，
  *    簡介先顯示 3 行（按「展開」看全部），目次、成分可點開。查詢來源、其他網站連結不放。
  */
-export function BookDetail({ info }: { info: BookInfo }) {
-  const rows = rowsOf(info).filter((r): r is [string, string] => !!r[1])
+export function BookDetail({ info, extraRows = [] }: { info: BookInfo; extraRows?: [string, string | null | undefined][] }) {
+  // extraRows：排在最前面的資料（前台商品：店內碼、售價、庫存…，2026-11-08）
+  const rows = [...extraRows, ...rowsOf(info)].filter((r): r is [string, string] => !!r[1])
   return (
     <div className="dt">
       <div className="dt-top">

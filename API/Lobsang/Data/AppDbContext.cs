@@ -37,6 +37,9 @@ namespace Lobsang.Data
         public DbSet<SeedMarker> SeedMarkers => Set<SeedMarker>();
         // Lobsang：書單（2026-11-07）
         public DbSet<Book> Books => Set<Book>();
+        public DbSet<Product> Products => Set<Product>();
+        public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+        public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -51,6 +54,30 @@ namespace Lobsang.Data
                 e.HasIndex(b => new { b.InstitutionId, b.Code }).IsUnique();
                 e.HasIndex(b => b.Title);
                 e.Property(b => b.DataJson).HasColumnType("longtext");
+            });
+
+            modelBuilder.Entity<Product>(e =>
+            {
+                e.ToTable("products");
+                e.HasIndex(p => new { p.InstitutionId, p.Sku }).IsUnique();
+                e.HasIndex(p => p.Code);
+                e.HasIndex(p => p.Name);
+                e.Property(p => p.DataJson).HasColumnType("longtext");
+            });
+
+            modelBuilder.Entity<PurchaseOrder>(e =>
+            {
+                e.ToTable("purchase_orders");
+                e.HasIndex(o => new { o.InstitutionId, o.OrderNo }).IsUnique();
+                e.HasMany(o => o.Items).WithOne(i => i.PurchaseOrder).HasForeignKey(i => i.PurchaseOrderId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<PurchaseOrderItem>(e =>
+            {
+                e.ToTable("purchase_order_items");
+                e.HasIndex(i => i.Status);
+                e.HasIndex(i => i.Code);
+                e.Property(i => i.DataJson).HasColumnType("longtext");
             });
 
             modelBuilder.Entity<OrgUnit>(e =>

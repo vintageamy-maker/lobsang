@@ -73,3 +73,28 @@ export const lookupCode = (code: string) =>
 export const searchCatalog = (q: string, page: number) =>
   getJson<{ total: number; page: number; pageSize: number; items: CatalogItem[] }>(
     `/api/public/books?q=${encodeURIComponent(q)}&page=${page}`)
+
+// ---------- 前台商品查詢（2026-11-08）：只查得到上架的；價格只有業主自己的售價 ----------
+
+export interface ProductItem {
+  sku: string
+  name: string
+  code: string
+  midCategory?: string | null
+  subCategory?: string | null
+  salePrice?: number | null
+  stock: number
+  authors?: string | null
+  info?: BookInfo | null
+}
+
+export interface ProductPage { total: number; page: number; pageSize: number; items: ProductItem[] }
+
+/** q：關鍵字（名稱、作者、店內碼、條碼）；code：掃到的條碼（精確比對） */
+export const searchProducts = (opt: { q?: string; code?: string; page?: number }) => {
+  const p = new URLSearchParams()
+  if (opt.q) p.set('q', opt.q)
+  if (opt.code) p.set('code', opt.code)
+  p.set('page', String(opt.page ?? 1))
+  return getJson<ProductPage>(`/api/public/products?${p}`)
+}

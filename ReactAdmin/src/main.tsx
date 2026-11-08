@@ -18,6 +18,7 @@ import Roles from './pages/Roles'
 import Menus from './pages/Menus'
 import Records from './pages/Records'
 import Books from './pages/Books'
+import Products from './pages/Products'
 import OrgUnits from './pages/OrgUnits'
 import Delegations from './pages/Delegations'
 import ApprovalFlows from './pages/ApprovalFlows'
@@ -81,6 +82,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="approval-flows" element={<ApprovalFlows />} />
             <Route path="records" element={<Records />} />
             <Route path="books" element={<Books />} />
+            {/* 商品（示意版 mock，2026-11-08）：選單由 DbSeeder 建立（書籍 → 商品） */}
+            <Route path="products" element={<Products />} />
             <Route path="audit-logs" element={<AuditLogs />} />
             <Route path="error-logs" element={<ErrorLogs />} />
             <Route path="my/step-up-password" element={<MyStepUpPassword />} />

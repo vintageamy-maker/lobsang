@@ -22,7 +22,7 @@ services:
       - "ConnectionStrings__Default=${LOBSANG_CONN}"
       - "Jwt__Key=${LOBSANG_JWT_KEY}"
       # 登入頁的「快速登入」清單。⚠ 只有開發站有；正式站的 compose 不可有這一行。
-      - "DemoAccounts=${LOBSANG_DEMO_ACCOUNTS}"
+      # 2026-11-08 業主：後台移除快速登入。⚠ DemoAccounts 會把帳號「連同密碼」從公開的 /api/auth/demo-accounts 回傳，開發站對外公開就不要放
       - "BookLookup__GoogleApiKey=${GOOGLE_BOOKS_API_KEY}"
       - "Line__ChannelSecret=${LINE_CHANNEL_SECRET}"
       - "Line__ChannelAccessToken=${LINE_CHANNEL_ACCESS_TOKEN}"

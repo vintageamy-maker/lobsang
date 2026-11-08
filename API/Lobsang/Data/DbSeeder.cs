@@ -40,6 +40,8 @@ namespace Lobsang.Data
             ("record.cancel",     "表單撤銷",     "表單"),
             // Lobsang：書單（2026-11-07）。查書本身是公開的，這個權限管「書單的新增、修改、刪除」
             ("book.manage",       "書單維護",     "書籍"),
+            // 2026-11-08：採購單的核准／退回。業主決定先只給系統管理員（系統管理員自動擁有所有權限）
+            ("purchase.approve",  "採購審核",     "書籍"),
         ];
 
         /// <param name="seedDemoUsers">
@@ -99,7 +101,11 @@ namespace Lobsang.Data
             var bookDir = await EnsureMenuDirAsync(db, "書籍", "book", 10);
 
             await EnsureMenuAsync(db, formDir, "表單列表", "/records", "file-text", 1, "record.read");
-            await EnsureMenuAsync(db, bookDir, "書單", "/books", "book", 1, "book.manage");
+            // 2026-11-08 業主：「書單」就是採購候選，選單改名「採購候選」；另加「商品」（實際販售，目前是示意版 mock）
+            await EnsureMenuAsync(db, bookDir, "採購候選", "/books", "book", 1, "book.manage");
+            await RenameDefaultMenuAsync(db, "/books", "書單", "採購候選");
+            await EnsureMenuAsync(db, bookDir, "商品清單", "/products", "shop", 2, "book.manage");
+            await RenameDefaultMenuAsync(db, "/products", "商品", "商品清單");   // 2026-11-08 業主：選單「商品」改叫「商品清單」
             await EnsureMenuAsync(db, orgDir, "組織編制", "/org-units", "apartment", 1, "org.manage");
             await EnsureMenuAsync(db, orgDir, "代理設定", "/delegations", "solution", 2, "delegation.manage");
             await EnsureMenuAsync(db, orgDir, "簽核流程", "/approval-flows", "branches", 3, "approval.config");
@@ -266,6 +272,18 @@ namespace Lobsang.Data
                 ParentId = parent.Id, Name = name, Path = path, Icon = icon,
                 SortOrder = sortOrder, PermissionCode = permissionCode,
             });
+            await db.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// 預設選單改名：只在名稱還是「舊的預設值」時才改（客戶自己在選單管理改過的不動）。
+        /// 例：/books 從「書單」改成「採購候選」（2026-11-08）。
+        /// </summary>
+        private static async Task RenameDefaultMenuAsync(AppDbContext db, string path, string oldName, string newName)
+        {
+            var m = await db.Menus.FirstOrDefaultAsync(x => x.Path == path && x.Name == oldName);
+            if (m is null) return;
+            m.Name = newName;
             await db.SaveChangesAsync();
         }
 

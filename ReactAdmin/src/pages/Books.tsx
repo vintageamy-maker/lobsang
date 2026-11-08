@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   Card, Table, Button, Space, Input, Checkbox, message, Tag, Popconfirm, Modal, Typography, Descriptions, Alert, Grid,
-  Form, Radio, Select, DatePicker, Collapse, type InputRef,
+  Form, Radio, Select, DatePicker, Collapse, Tabs, InputNumber, type InputRef,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, ScanOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons'
+import { CameraOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, ScanOutlined, SearchOutlined, SendOutlined, LinkOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../api'
 import GuideAlert from '../components/GuideAlert'
+import { Link } from 'react-router-dom'
+import { useTabParam } from '../useTabParam'
+import PurchaseOrders from './PurchaseOrders'
 import { BarcodeScanner, canScan } from '../components/BarcodeScanner'
 import { esliteCode, fetchEslite, mergeEslite } from '../components/eslite'
 
 /**
- * 書單（Lobsang，2026-11-07）
- * ・上半部：用 ISBN／條碼查書（後端同時查國圖、Google Books、openBD…），查到後加入書單
- * ・下半部：書單列表，可搜尋、改備註、刪除、匯出 CSV
- * ⭐ 書單會出現在公開頁（主站 /）的「搜尋書單」；備註只在後台看得到。
+ * 採購清單（Lobsang，2026-11-07）
+ * ・上半部：用 ISBN／條碼查書（後端同時查國圖、Google Books、openBD…），查到後加入採購清單
+ * ・下半部：採購清單列表，可搜尋、改備註、刪除、匯出 CSV
+ * ⭐ 採購清單會出現在公開頁（主站 /）的「搜尋採購清單」；備註只在後台看得到。
  * ⭐ 移植自 C:\Han\book\isbn.html，查詢邏輯在後端 BookLookupService。
  */
 
-interface BookInfo {
+export interface BookInfo {
   kind: 'book' | 'product'
   code: string
   isbn10?: string | null
@@ -46,7 +49,7 @@ interface BookInfo {
 }
 interface SourceStatus { name: string; state: 'ok' | 'none' | 'err'; note?: string | null }
 interface LinkItem { label: string; url: string }
-interface LookupResult {
+export interface LookupResult {
   kind?: string | null
   code?: string | null
   notes: string[]
@@ -72,13 +75,13 @@ interface BookRow {
 
 const AUTO_ADD_KEY = 'lobsang_books_auto_add'
 
-type AdminLookup = { result: LookupResult; existingId: number | null; existingNote: string | null }
+export type AdminLookup = { result: LookupResult; existingId: number | null; existingNote: string | null }
 
 /**
  * 後台查書：伺服器查詢＋誠品線上（在瀏覽器查，見 components/eslite.ts）同時出發，兩邊都回來才合併。
- * ⭐ 合併後的 info 存進書單時會一起送到後端（DataJson），所以書單裡的書也帶有誠品的資料。
+ * ⭐ 合併後的 info 存進採購清單時會一起送到後端（DataJson），所以採購清單裡的書也帶有誠品的資料。
  */
-async function adminLookup(code: string): Promise<AdminLookup> {
+export async function adminLookup(code: string): Promise<AdminLookup> {
   const isbn = esliteCode(code)   // ISBN 或商品條碼（誠品也賣商品）
   const [r, outcome] = await Promise.all([
     api.get<AdminLookup>(`/api/admin/books/lookup?code=${encodeURIComponent(code)}`),
@@ -88,13 +91,13 @@ async function adminLookup(code: string): Promise<AdminLookup> {
 }
 
 // ---------- 連續掃描 ----------
-// ⭐ 相機不關、掃到一個就丟進佇列在背景查詢＋加入書單，使用者不用等查完就能掃下一本
+// ⭐ 相機不關、掃到一個就丟進佇列在背景查詢＋加入採購清單，使用者不用等查完就能掃下一本
 //    （台灣書查國圖要十幾秒，排隊一本本等會很慢，所以同時最多查 BATCH_PARALLEL 本）
 type BatchStatus = 'pending' | 'added' | 'exists' | 'notfound' | 'error'
 interface BatchItem { code: string; status: BatchStatus; title?: string; msg?: string }
 const BATCH_PARALLEL = 3
 const BATCH_LABEL: Record<BatchStatus, string> = {
-  pending: '查詢中…', added: '已加入', exists: '本來就在書單', notfound: '查不到', error: '失敗',
+  pending: '查詢中…', added: '已加入', exists: '本來就在採購清單', notfound: '查不到', error: '失敗',
 }
 const BATCH_COLOR: Record<BatchStatus, string> = {
   pending: 'processing', added: 'success', exists: 'default', notfound: 'error', error: 'error',
@@ -166,7 +169,6 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'pages', label: '頁數', width: 7, get: b => b.info?.pages },
   { key: 'quantity', label: '規格／容量', width: 14, get: b => b.info?.quantity },
   { key: 'price', label: '定價', common: true, width: 12, get: b => b.info?.price },
-  { key: 'salePrice', label: '售價', common: true, width: 12, get: b => b.info?.salePrice },
   { key: 'language', label: '語言', width: 8, get: b => b.info?.language },
   { key: 'categories', label: '分類', width: 20, get: b => b.info?.categories?.join('、') },
   { key: 'region', label: '產地／條碼註冊地', width: 16, get: b => (b.kind === 'product' ? b.info?.gs1 : b.info?.regionLabel) },
@@ -182,10 +184,10 @@ const ALL_COLS = EXPORT_COLUMNS.map(c => c.key)
 const COMMON_COLS = EXPORT_COLUMNS.filter(c => c.common).map(c => c.key)
 const EXPORT_COLS_KEY = 'lobsang_books_export_cols'
 const EXPORT_FORMAT_KEY = 'lobsang_books_export_format'
-const EXPORT_FONT = '微軟正黑體'   // = Microsoft JhengHei
-const ROW_HEIGHT = 16             // 匯出 Excel 的列高（點），業主指定固定 16
+export const EXPORT_FONT = '微軟正黑體'   // = Microsoft JhengHei
+export const ROW_HEIGHT = 16             // 匯出 Excel 的列高（點），業主指定固定 16
 
-function downloadBlob(blob: Blob, name: string) {
+export function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = name
@@ -204,12 +206,12 @@ function buildCsv(cols: ExportColumn[], items: BookRow[]): Blob {
 
 /**
  * Excel：全部微軟正黑體；標題列黑底白字粗體置中、凍結在最上面；每列列高固定 16；條碼存成文字。
- * ⭐ exceljs 約 1 MB，按匯出才載入（import()），平常開書單頁不用下載。
+ * ⭐ exceljs 約 1 MB，按匯出才載入（import()），平常開採購清單頁不用下載。
  */
 async function buildXlsx(cols: ExportColumn[], items: BookRow[]): Promise<Blob> {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('書單', { views: [{ state: 'frozen', ySplit: 1 }], properties: { defaultRowHeight: ROW_HEIGHT } })
+  const ws = wb.addWorksheet('採購清單', { views: [{ state: 'frozen', ySplit: 1 }], properties: { defaultRowHeight: ROW_HEIGHT } })
   ws.columns = cols.map(c => ({ header: c.label, key: c.key, width: c.width ?? 14 }))
   for (const b of items) {
     ws.addRow(Object.fromEntries(cols.map(c => {
@@ -245,7 +247,7 @@ function loadExportCols(): string[] {
 }
 
 function applyExportFilter(rows: BookRow[], f: ExportFilter): BookRow[] {
-  // 關鍵字規則與書單搜尋（後端 BookQueries.Filter）一致：空白分開＝每個字都要符合；後台多比對備註
+  // 關鍵字規則與採購清單搜尋（後端 BookQueries.Filter）一致：空白分開＝每個字都要符合；後台多比對備註
   const words = f.keyword.trim().toLowerCase().split(/\s+/).filter(Boolean)
   return rows.filter(b => {
     if (f.kind !== 'all' && b.kind !== f.kind) return false
@@ -265,8 +267,8 @@ function applyExportFilter(rows: BookRow[], f: ExportFilter): BookRow[] {
   })
 }
 
-/** fixed：固定高度（寬 × 1.35）並裁切，書單表格用，不然每本封面比例不同、列高會不一致 */
-function Cover({ covers, width, fixed }: { covers: string[]; width: number; fixed?: boolean }) {
+/** fixed：固定高度（寬 × 1.35）並裁切，採購清單表格用，不然每本封面比例不同、列高會不一致 */
+export function Cover({ covers, width, fixed }: { covers: string[]; width: number; fixed?: boolean }) {
   const [i, setI] = useState(0)
   useEffect(() => setI(0), [covers])
   const src = covers[i]
@@ -281,16 +283,16 @@ function Cover({ covers, width, fixed }: { covers: string[]; width: number; fixe
 
 function infoItems(b: BookInfo) {
   const rows: [string, string | null | undefined][] = b.kind === 'product'
-    ? [['品牌', b.brand], ['規格', b.quantity], ['定價', b.price], ['售價', b.salePrice], ['分類', b.categories.join('、')], ['銷售地區', b.countries],
+    ? [['品牌', b.brand], ['規格', b.quantity], ['定價', b.price], ['分類', b.categories.join('、')], ['銷售地區', b.countries],
        ['條碼註冊地', b.gs1], ['條碼', b.code], ['資料來源', b.sources.join('、')]]
     : [['作者', b.authors.join('、')], ['出版社', b.publisher], ['出版日期', b.date], ['版次', b.edition],
-       ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['售價', b.salePrice], ['語言', b.language],
+       ['頁數', b.pages ? `${b.pages} 頁` : null], ['定價', b.price], ['語言', b.language],
        ['分類', b.categories.join('、')], ['ISBN-13', b.code], ['ISBN-10', b.isbn10],
        ['產地判斷', b.regionLabel], ['資料來源', b.sources.join('、')]]
   return rows.filter(r => r[1]).map(([k, v]) => ({ key: k, label: k, children: v }))
 }
 
-function BookDetail({ info }: { info: BookInfo }) {
+export function BookDetail({ info }: { info: BookInfo }) {
   // 目次、成分可點開（2026-11-07 補上，跟公開頁一致）
   const more = [
     ...(info.ingredients ? [{ key: 'ing', label: '成分', children: <div style={{ whiteSpace: 'pre-wrap' }}>{info.ingredients}</div> }] : []),
@@ -328,7 +330,26 @@ function StatusTags({ statuses }: { statuses: SourceStatus[] }) {
   )
 }
 
+/**
+ * 「採購候選」頁（選單 書籍 → 採購候選，2026-11-08）：兩個分頁
+ *   ・採購清單（第一階段）：查書後加入的清單，可以勾選送審
+ *   ・採購審核（第二階段）：採購單，主管核准／退回，核准的上架成商品（PurchaseOrders.tsx）
+ */
 export default function Books() {
+  const [tab, setTab] = useTabParam('list', ['list', 'review'])
+  const [reviewKey, setReviewKey] = useState(0)
+  return (
+    <Tabs activeKey={tab} onChange={setTab} destroyOnHidden={false} items={[
+      {
+        key: 'list', label: '採購清單',
+        children: <PurchaseList onSubmitted={() => { setReviewKey(k => k + 1); setTab('review') }} />,
+      },
+      { key: 'review', label: '採購審核', children: <PurchaseOrders refreshKey={reviewKey} /> },
+    ]} />
+  )
+}
+
+function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void }) {
   // ---------- 查書 ----------
   const [code, setCode] = useState('')
   const [looking, setLooking] = useState(false)
@@ -339,7 +360,7 @@ export default function Books() {
   const inputRef = useRef<InputRef>(null)
   const [scanning, setScanning] = useState(false)
 
-  // ---------- 書單 ----------
+  // ---------- 採購清單 ----------
   const [rows, setRows] = useState<BookRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -348,6 +369,31 @@ export default function Books() {
   const [editing, setEditing] = useState<BookRow | null>(null)
   const [editNote, setEditNote] = useState('')
   const [viewing, setViewing] = useState<BookRow | null>(null)
+
+  // ---------- 送審（2026-11-08）：勾選 → 填數量 → 建採購單，書從採購清單移走 ----------
+  const [picked, setPicked] = useState<BookRow[]>([])
+  const [submitOpen, setSubmitOpen] = useState(false)
+  const [qty, setQty] = useState<Record<number, number>>({})
+  const [submitNote, setSubmitNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const openSubmit = () => {
+    setQty(Object.fromEntries(picked.map(b => [b.id, qty[b.id] ?? 1])))
+    setSubmitOpen(true)
+  }
+  const submitOrder = async () => {
+    setSubmitting(true)
+    try {
+      const r = await api.post<{ id: number; orderNo: string }>('/api/admin/purchase-orders', {
+        lines: picked.map(b => ({ bookId: b.id, quantity: qty[b.id] ?? 1 })), note: submitNote || null,
+      })
+      message.success(`已送審：採購單 ${r.orderNo}（${picked.length} 本已從採購清單移到採購單）`)
+      setSubmitOpen(false); setPicked([]); setSubmitNote('')
+      load(q, 1)
+      onSubmitted(r.orderNo)
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : '送審失敗')
+    } finally { setSubmitting(false) }
+  }
 
   const load = useCallback(async (query: string, p: number) => {
     setLoading(true)
@@ -365,7 +411,7 @@ export default function Books() {
     setSaving(true)
     try {
       const r = await api.post<{ id: number; isNew: boolean }>('/api/admin/books', { info, note: noteText })
-      message.success(r.isNew ? '已加入書單' : '書單裡已有這本，已更新資料')
+      message.success(r.isNew ? '已加入採購清單' : '採購清單裡已有這本，已更新資料')
       setLookup(prev => prev ? { ...prev, existingId: r.id, existingNote: noteText } : prev)
       load(q, 1)
     } catch (e) {
@@ -427,7 +473,7 @@ export default function Books() {
       batchActive.current++
       processBatch(c).finally(() => {
         batchActive.current--
-        if (!batchActive.current && !batchWaiting.current.length) load(qRef.current, 1)   // 全部查完才重載書單
+        if (!batchActive.current && !batchWaiting.current.length) load(qRef.current, 1)   // 全部查完才重載採購清單
         pumpBatch()
       })
     }
@@ -453,7 +499,7 @@ export default function Books() {
   const remove = async (row: BookRow) => {
     try {
       await api.del(`/api/admin/books/${row.id}`)
-      message.success('已從書單移除')
+      message.success('已從採購清單移除')
       if (lookup?.existingId === row.id) setLookup({ ...lookup, existingId: null, existingNote: null })
       load(q, rows.length === 1 && page > 1 ? page - 1 : page)
     } catch (e) {
@@ -474,7 +520,7 @@ export default function Books() {
   }
 
   // ---------- 匯出（先篩選再匯出） ----------
-  // ⭐ 篩選在前端做：書單量不大，一次抓全部（pageSize=0）再篩，篩選條件改了筆數馬上更新，不用每次問伺服器
+  // ⭐ 篩選在前端做：採購清單量不大，一次抓全部（pageSize=0）再篩，篩選條件改了筆數馬上更新，不用每次問伺服器
   const [exportOpen, setExportOpen] = useState(false)
   const [exportAll, setExportAll] = useState<BookRow[] | null>(null)
   const [exportFilter, setExportFilter] = useState<ExportFilter>(EMPTY_FILTER)
@@ -487,7 +533,7 @@ export default function Books() {
       const r = await api.get<{ items: BookRow[] }>('/api/admin/books?pageSize=0')
       setExportAll(r.items)
     } catch (e) {
-      message.error(e instanceof ApiError ? e.message : '讀取書單失敗')
+      message.error(e instanceof ApiError ? e.message : '讀取採購清單失敗')
       setExportOpen(false)
     }
   }
@@ -508,7 +554,7 @@ export default function Books() {
 
   const exportFile = async (items: BookRow[]) => {
     const cols = EXPORT_COLUMNS.filter(c => exportCols.includes(c.key))
-    const name = `書單_${dayjs().format('YYYY-MM-DD')}`
+    const name = `採購清單_${dayjs().format('YYYY-MM-DD')}`
     setExporting(true)
     try {
       if (exportFormat === 'xlsx') downloadBlob(await buildXlsx(cols, items), `${name}.xlsx`)
@@ -523,7 +569,7 @@ export default function Books() {
   }
   const regionOptions = [...new Set((exportAll ?? []).filter(b => b.kind !== 'product').map(b => b.info?.regionLabel).filter((v): v is string => !!v))]
 
-  // 手機直式（< 768px）用精簡版書單
+  // 手機直式（< 768px）用精簡版採購清單
   const screens = Grid.useBreakpoint()
   const isNarrow = !screens.md
   const coverCell = (r: BookRow) => (
@@ -534,7 +580,7 @@ export default function Books() {
       <Button size="small" icon={<EditOutlined />} aria-label="備註" onClick={() => { setEditing(r); setEditNote(r.note ?? '') }}>
         {compact ? null : '備註'}
       </Button>
-      <Popconfirm title={`從書單移除「${r.title}」？`} okText="移除" cancelText="取消" onConfirm={() => remove(r)}>
+      <Popconfirm title={`從採購清單移除「${r.title}」？`} okText="移除" cancelText="取消" onConfirm={() => remove(r)}>
         <Button size="small" danger icon={<DeleteOutlined />} aria-label="移除" />
       </Popconfirm>
     </Space>
@@ -545,12 +591,15 @@ export default function Books() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <GuideAlert id="books-intro" style={{ marginBottom: 0 }} title="用 ISBN 或商品條碼查書，查到後加入書單">
-        書單會公開在主站的「搜尋書單」，任何人都能搜尋；備註只有後台看得到。可以按「掃描」用手機相機掃，或用條碼掃描器直接掃，
-        一次要掃很多本就按「連續掃描」，相機不會關，掃到就自動加入書單。台灣書會查國家圖書館，可能要等十幾秒。
+      <GuideAlert id="books-intro" style={{ marginBottom: 0 }} title="用 ISBN 或商品條碼查書，查到後加入採購清單">
+        採購清單只在後台，前台看不到（前台只有商品查詢）。可以按「掃描」用手機相機掃，或用條碼掃描器直接掃，
+        一次要掃很多本就按「連續掃描」，相機不會關，掃到就自動加入採購清單。台灣書會查國家圖書館，可能要等十幾秒。
       </GuideAlert>
+      {/* 2026-11-08 選單「書單」改名「採購候選」，頁面裡的字樣改叫「採購清單」；另有「商品」（實際販售） */}
+      <Alert type="info" showIcon style={{ marginBottom: 0 }}
+        message={<>這裡是「採購候選」（預計要採購的書）。實際販售的商品在選單「<Link to="/products">商品</Link>」。</>} />
 
-      <Card title="Search" extra={<a href="/" target="_blank" rel="noreferrer"><LinkOutlined /> 公開 Search 頁</a>}>
+      <Card extra={<a href="/" target="_blank" rel="noreferrer"><LinkOutlined /> 前台</a>}>
         <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
           <Input ref={inputRef} value={code} onChange={e => setCode(e.target.value)} onPressEnter={() => runLookup()}
             placeholder="ISBN 或商品條碼，例如 9786264186421" inputMode="numeric" autoFocus allowClear />
@@ -573,8 +622,8 @@ export default function Books() {
           <Checkbox checked={autoAdd} onChange={e => {
             setAutoAdd(e.target.checked)
             try { localStorage.setItem(AUTO_ADD_KEY, e.target.checked ? '1' : '0') } catch { /* 無痕模式等 */ }
-          }}>查到後自動加入書單</Checkbox>
-          {canScan() && <Button size="small" icon={<ScanOutlined />} onClick={startBatch}>連續掃描（掃到就加入書單）</Button>}
+          }}>查到後自動加入採購清單</Checkbox>
+          {canScan() && <Button size="small" icon={<ScanOutlined />} onClick={startBatch}>連續掃描（掃到就加入採購清單）</Button>}
         </Space></div>
 
         {batch.length > 0 && !batchScanning && (() => {
@@ -622,14 +671,14 @@ export default function Books() {
             )}
             {canAdd && res.info && (
               <>
-                {lookup?.existingId && <Tag color="green" style={{ marginBottom: 8 }}>已在書單裡</Tag>}
+                {lookup?.existingId && <Tag color="green" style={{ marginBottom: 8 }}>已在採購清單裡</Tag>}
                 <BookDetail info={res.info} />
                 <div style={{ marginTop: 8 }}><StatusTags statuses={res.statuses} /></div>
                 <Space style={{ marginTop: 12, width: '100%', maxWidth: 560 }} direction="vertical">
                   <Input.TextArea value={note} onChange={e => setNote(e.target.value)} rows={2} maxLength={1000}
                     placeholder="備註（選填，只有後台看得到）：放在哪裡、借給誰…" />
                   <Button type="primary" loading={saving} onClick={() => save(res.info!, note)}>
-                    {lookup?.existingId ? '更新書單裡的資料' : '加入書單'}
+                    {lookup?.existingId ? '更新採購清單裡的資料' : '加入採購清單'}
                   </Button>
                 </Space>
               </>
@@ -643,8 +692,9 @@ export default function Books() {
         )}
       </Card>
 
-      <Card title={`書單（${total} 筆）`} extra={
-        <Space>
+      <Card title={`採購清單（${total} 筆）`} extra={
+        <Space wrap>
+          <Button type="primary" icon={<SendOutlined />} disabled={!picked.length} onClick={openSubmit}>送審（{picked.length}）</Button>
           <Button icon={<DownloadOutlined />} onClick={openExport} disabled={!total}>匯出</Button>
           <Button icon={<ReloadOutlined />} onClick={() => load(q, page)} />
         </Space>
@@ -653,12 +703,17 @@ export default function Books() {
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
         {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1350 }}
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1260 }}
+          // 勾選要送審的書；換頁也記得之前勾的（preserveSelectedRowKeys）
+          rowSelection={{
+            selectedRowKeys: picked.map(b => b.id), preserveSelectedRowKeys: true,
+            onChange: (_keys, selectedRows) => setPicked(selectedRows.filter(Boolean)),
+          }}
           pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: p => load(q, p), size: isNarrow ? 'small' : undefined }}
           columns={isNarrow ? [
             { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
             {
-              title: '書單', key: 'main', render: (_, r) => (
+              title: '採購清單', key: 'main', render: (_, r) => (
                 <div style={{ minWidth: 0, lineHeight: 1.5 }}>
                   <a onClick={() => setViewing(r)} style={{ fontWeight: 600 }}>{r.title}</a>
                   {r.kind === 'product' && <Tag style={{ marginLeft: 6 }}>商品</Tag>}
@@ -669,7 +724,6 @@ export default function Books() {
                   )}
                   <div style={{ fontSize: 12 }}>
                     {r.info?.price && <Typography.Text strong style={{ marginRight: 8 }}>{r.info.price}</Typography.Text>}
-                    {r.info?.salePrice && <Typography.Text style={{ marginRight: 8 }}>售價 {r.info.salePrice}</Typography.Text>}
                     <Typography.Text type="secondary" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{r.code}</Typography.Text>
                   </div>
                   {r.note && <Typography.Text type="secondary" ellipsis style={{ fontSize: 12, display: 'block' }}>備註：{r.note}</Typography.Text>}
@@ -686,8 +740,6 @@ export default function Books() {
             { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
             { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
             { title: '定價', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
-            // 售價目前只有誠品有（2026-11-07 起查書才會存；之前加入的書要重查才有）
-            { title: '售價', key: 'salePrice', width: 90, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.salePrice ?? ''}>{r.info?.salePrice ?? ''}</span> },
             { title: 'ISBN／條碼', dataIndex: 'code', width: 140, ellipsis: true },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
             { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },
@@ -696,7 +748,7 @@ export default function Books() {
       </Card>
 
       {/* 匯出前篩選（2026-11-07）：條件一改，下方筆數馬上更新；按「匯出」才下載 */}
-      <Modal title="匯出書單" open={exportOpen} onCancel={() => setExportOpen(false)} destroyOnHidden width={520}
+      <Modal title="匯出採購清單" open={exportOpen} onCancel={() => setExportOpen(false)} destroyOnHidden width={520}
         footer={
           <Space>
             <Button onClick={() => setExportFilter(EMPTY_FILTER)}>清除條件</Button>
@@ -723,7 +775,7 @@ export default function Books() {
                 options={regionOptions.map(r => ({ label: r, value: r }))} />
             </Form.Item>
           )}
-          <Form.Item label="加入書單的日期">
+          <Form.Item label="加入採購清單的日期">
             <DatePicker.RangePicker style={{ width: '100%' }} value={exportFilter.dates} allowEmpty={[false, false]}
               placeholder={['開始日期', '結束日期']} inputReadOnly={isNarrow}
               onChange={v => setExportFilter({ ...exportFilter, dates: v && v[0] && v[1] ? [v[0], v[1]] : null })} />
@@ -754,12 +806,12 @@ export default function Books() {
           </Form.Item>
         </Form>
         <Alert type={exportAll && exportRows.length === 0 ? 'warning' : 'info'} showIcon
-          message={!exportAll ? '讀取書單中…'
-            : exportRows.length === 0 ? `沒有符合條件的資料（書單共 ${exportAll.length} 筆）`
-            : `符合條件 ${exportRows.length} 筆（書單共 ${exportAll.length} 筆）`} />
+          message={!exportAll ? '讀取採購清單中…'
+            : exportRows.length === 0 ? `沒有符合條件的資料（採購清單共 ${exportAll.length} 筆）`
+            : `符合條件 ${exportRows.length} 筆（採購清單共 ${exportAll.length} 筆）`} />
       </Modal>
 
-      {/* 書單的詳細資料：點封面或書名開啟（2026-11-07 由展開列改成彈窗） */}
+      {/* 採購清單的詳細資料：點封面或書名開啟（2026-11-07 由展開列改成彈窗） */}
       <Modal title="詳細資料" open={!!viewing} onCancel={() => setViewing(null)} width={720} destroyOnHidden
         footer={viewing && (
           <Space>
@@ -774,7 +826,7 @@ export default function Books() {
               : <Typography.Title level={4} style={{ marginTop: 0 }}>{viewing.title}</Typography.Title>}
             <Descriptions size="small" column={1} style={{ marginTop: 12 }} items={[
               { key: 'note', label: '備註', children: viewing.note || <Typography.Text type="secondary">（無）</Typography.Text> },
-              { key: 'created', label: '加入書單', children: new Date(viewing.createdAt + (/[zZ]|[+-]\d\d:?\d\d$/.test(viewing.createdAt) ? '' : 'Z')).toLocaleString('zh-TW', { hour12: false }) },
+              { key: 'created', label: '加入採購清單', children: new Date(viewing.createdAt + (/[zZ]|[+-]\d\d:?\d\d$/.test(viewing.createdAt) ? '' : 'Z')).toLocaleString('zh-TW', { hour12: false }) },
             ]} />
           </>
         )}
@@ -784,6 +836,27 @@ export default function Books() {
         okText="儲存" cancelText="取消" destroyOnHidden>
         <Input.TextArea value={editNote} onChange={e => setEditNote(e.target.value)} rows={4} maxLength={1000} showCount
           placeholder="只有後台看得到：放在哪裡、借給誰…" />
+      </Modal>
+
+      {/* 送審：每本填採購數量 → 建採購單 */}
+      <Modal title={`送審：${picked.length} 本`} open={submitOpen} onCancel={() => setSubmitOpen(false)} width={760} destroyOnHidden
+        okText="送出採購單" cancelText="取消" onOk={submitOrder} okButtonProps={{ loading: submitting, disabled: !picked.length }}>
+        <Alert type="info" showIcon style={{ marginBottom: 12 }}
+          message="送出後這些書會從「採購清單」移到一張新的採購單，等主管在「採購審核」核准；退回的會回到採購清單。" />
+        <Table<BookRow> rowKey="id" size="small" dataSource={picked} pagination={false} scroll={{ y: 360 }}
+          columns={[
+            { title: '書名', dataIndex: 'title', ellipsis: true },
+            { title: 'ISBN／條碼', dataIndex: 'code', width: 140 },
+            { title: '定價', key: 'price', width: 100, render: (_, r) => r.info?.price ?? '' },
+            {
+              title: '採購數量', key: 'qty', width: 110, render: (_, r) => (
+                <InputNumber min={1} max={9999} precision={0} value={qty[r.id] ?? 1} style={{ width: 90 }}
+                  onChange={v => setQty(m => ({ ...m, [r.id]: v ?? 1 }))} />
+              ),
+            },
+          ]} />
+        <Input.TextArea value={submitNote} onChange={e => setSubmitNote(e.target.value)} rows={2} maxLength={1000}
+          placeholder="說明（選填）：為什麼要買、預算…" style={{ marginTop: 12 }} />
       </Modal>
     </Space>
   )
