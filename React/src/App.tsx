@@ -15,7 +15,6 @@ export default function App() {
   return (
     <div className="page">
       <header className="hero">
-        <div className="hero-badge">Lobsang</div>
         <h1>商品查詢系統</h1>
       </header>
 
