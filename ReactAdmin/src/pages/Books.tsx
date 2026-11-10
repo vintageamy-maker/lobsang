@@ -169,6 +169,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'pages', label: '頁數', width: 7, get: b => b.info?.pages },
   { key: 'quantity', label: '規格／容量', width: 14, get: b => b.info?.quantity },
   { key: 'price', label: '定價', common: true, width: 12, get: b => b.info?.price },
+  // 2026-11-10 業主：誠品有賣的書順便帶誠品線上價（誠品打折後的售價，查書時從誠品抓到的 salePrice）
+  { key: 'salePrice', label: '誠品線上價', common: true, width: 12, get: b => b.info?.salePrice },
   { key: 'language', label: '語言', width: 8, get: b => b.info?.language },
   { key: 'categories', label: '分類', width: 20, get: b => b.info?.categories?.join('、') },
   { key: 'region', label: '產地／條碼註冊地', width: 16, get: b => (b.kind === 'product' ? b.info?.gs1 : b.info?.regionLabel) },
@@ -703,7 +705,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
         {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1260 }}
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1360 }}
           // 勾選要送審的書；換頁也記得之前勾的（preserveSelectedRowKeys）
           rowSelection={{
             selectedRowKeys: picked.map(b => b.id), preserveSelectedRowKeys: true,
@@ -724,6 +726,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
                   )}
                   <div style={{ fontSize: 12 }}>
                     {r.info?.price && <Typography.Text strong style={{ marginRight: 8 }}>{r.info.price}</Typography.Text>}
+                    {r.info?.salePrice && <Typography.Text style={{ marginRight: 8 }}>誠品 {r.info.salePrice}</Typography.Text>}
                     <Typography.Text type="secondary" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{r.code}</Typography.Text>
                   </div>
                   {r.note && <Typography.Text type="secondary" ellipsis style={{ fontSize: 12, display: 'block' }}>備註：{r.note}</Typography.Text>}
@@ -740,6 +743,8 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
             { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
             { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
             { title: '定價', key: 'price', width: 110, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.price ?? ''}>{r.info?.price ?? ''}</span> },
+            // 誠品線上價：誠品打折後的售價，只有誠品有賣的書才有（2026-11-10）
+            { title: '誠品線上價', key: 'salePrice', width: 100, ellipsis: { showTitle: false }, render: (_, r) => <span title={r.info?.salePrice ?? ''}>{r.info?.salePrice ?? ''}</span> },
             { title: 'ISBN／條碼', dataIndex: 'code', width: 140, ellipsis: true },
             { title: '備註', dataIndex: 'note', width: 160, ellipsis: true },
             { title: '操作', key: 'op', width: 110, fixed: 'right', render: (_, r) => opCell(r, false) },
