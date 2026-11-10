@@ -35,6 +35,16 @@ namespace Lobsang.Controllers
             var rows = pageSize <= 0
                 ? await ordered.ToListAsync()
                 : await ordered.Skip((page - 1) * Math.Min(pageSize, 200)).Take(Math.Min(pageSize, 200)).ToListAsync();
+
+            // 2026-11-10 業主：採購清單表格標示「已在商品清單」（條碼一樣；UPC 存 13 碼前面補 0 的也算）
+            var codes = rows.Select(b => b.Code).Distinct().ToList();
+            var codes0 = codes.Select(c => "0" + c).ToList();
+            var inProducts = (await db.Products.AsNoTracking()
+                    .Where(p => p.InstitutionId == InstitutionId && (codes.Contains(p.Code) || codes0.Contains(p.Code)))
+                    .Select(p => new { p.Code, p.Sku, p.Stock, p.IsListed }).ToListAsync())
+                .GroupBy(p => p.Code.Length == 13 && p.Code.StartsWith('0') && !codes.Contains(p.Code) ? p.Code[1..] : p.Code)
+                .ToDictionary(g => g.Key, g => g.First());
+
             return Ok(new
             {
                 total,
@@ -43,6 +53,7 @@ namespace Lobsang.Controllers
                     id = b.Id, code = b.Code, kind = b.Kind, title = b.Title, authors = b.Authors,
                     publisher = b.Publisher, pubDate = b.PubDate, note = b.Note, createdAt = b.CreatedAt,
                     info = BookQueries.ParseInfo(b.DataJson),
+                    product = inProducts.TryGetValue(b.Code, out var p) ? new { sku = p.Sku, stock = p.Stock, isListed = p.IsListed } : null,
                 }),
             });
         }
@@ -54,7 +65,14 @@ namespace Lobsang.Controllers
             var existing = r.Code is null ? null
                 : await db.Books.AsNoTracking().Where(b => b.InstitutionId == InstitutionId && b.Code == r.Code)
                     .Select(b => new { b.Id, b.Note }).FirstOrDefaultAsync(ct);
-            return Ok(new { result = r, existingId = existing?.Id, existingNote = existing?.Note });
+            // 2026-11-10 業主：查到的書已經在商品清單（已經在賣）就提示，避免重複採購；自動加入／連續掃描也不加
+            //   UPC-A 存成 13 碼（前面補 0）的也要對得到
+            var product = r.Code is null ? null
+                : await db.Products.AsNoTracking()
+                    .Where(p => p.InstitutionId == InstitutionId && (p.Code == r.Code || p.Code == "0" + r.Code))
+                    .Select(p => new { id = p.Id, sku = p.Sku, name = p.Name, stock = p.Stock, isListed = p.IsListed })
+                    .FirstOrDefaultAsync(ct);
+            return Ok(new { result = r, existingId = existing?.Id, existingNote = existing?.Note, product });
         }
 
         /// <summary>加入書單；同一個條碼已經在書單裡就更新資料（備註有給才覆蓋）</summary>

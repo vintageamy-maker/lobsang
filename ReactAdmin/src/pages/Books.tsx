@@ -71,11 +71,15 @@ interface BookRow {
   note: string | null
   createdAt: string
   info: BookInfo | null
+  /** 已在商品清單（條碼相同）就有值（2026-11-10） */
+  product?: { sku: string; stock: number; isListed: boolean } | null
 }
 
 const AUTO_ADD_KEY = 'lobsang_books_auto_add'
 
-export type AdminLookup = { result: LookupResult; existingId: number | null; existingNote: string | null }
+/** 查到的書已經在商品清單時（2026-11-10），後端一起回傳那個商品的基本資料 */
+export interface InProduct { id: number; sku: string; name: string; stock: number; isListed: boolean }
+export type AdminLookup = { result: LookupResult; existingId: number | null; existingNote: string | null; product?: InProduct | null }
 
 /**
  * 後台查書：伺服器查詢＋誠品線上（在瀏覽器查，見 components/eslite.ts）同時出發，兩邊都回來才合併。
@@ -93,19 +97,19 @@ export async function adminLookup(code: string): Promise<AdminLookup> {
 // ---------- 連續掃描 ----------
 // ⭐ 相機不關、掃到一個就丟進佇列在背景查詢＋加入採購清單，使用者不用等查完就能掃下一本
 //    （台灣書查國圖要十幾秒，排隊一本本等會很慢，所以同時最多查 BATCH_PARALLEL 本）
-type BatchStatus = 'pending' | 'added' | 'exists' | 'notfound' | 'error'
+type BatchStatus = 'pending' | 'added' | 'exists' | 'inProducts' | 'notfound' | 'error'
 interface BatchItem { code: string; status: BatchStatus; title?: string; msg?: string }
 const BATCH_PARALLEL = 3
 const BATCH_LABEL: Record<BatchStatus, string> = {
-  pending: '查詢中…', added: '已加入', exists: '本來就在採購清單', notfound: '查不到', error: '失敗',
+  pending: '查詢中…', added: '已加入', exists: '本來就在採購清單', inProducts: '已在商品清單', notfound: '查不到', error: '失敗',
 }
 const BATCH_COLOR: Record<BatchStatus, string> = {
-  pending: 'processing', added: 'success', exists: 'default', notfound: 'error', error: 'error',
+  pending: 'processing', added: 'success', exists: 'default', inProducts: 'orange', notfound: 'error', error: 'error',
 }
 
 function batchCounts(items: BatchItem[]) {
   const n = (s: BatchStatus) => items.filter(i => i.status === s).length
-  return { added: n('added'), exists: n('exists'), failed: n('notfound') + n('error'), pending: n('pending') }
+  return { added: n('added'), exists: n('exists'), inProducts: n('inProducts'), failed: n('notfound') + n('error'), pending: n('pending') }
 }
 
 /** 相機畫面下方的即時結果：總數＋最近 3 本 */
@@ -115,7 +119,7 @@ function BatchOverlay({ items }: { items: BatchItem[] }) {
   return (
     <div style={OV.box}>
       <div style={{ fontWeight: 700, marginBottom: 4 }}>
-        已掃 {items.length} 本：加入 {c.added}・原本就有 {c.exists}・查不到 {c.failed}{c.pending ? `・查詢中 ${c.pending}` : ''}
+        已掃 {items.length} 本：加入 {c.added}・原本就有 {c.exists}{c.inProducts ? `・已在商品清單 ${c.inProducts}` : ''}・查不到 {c.failed}{c.pending ? `・查詢中 ${c.pending}` : ''}
       </div>
       {items.slice(0, 3).map(i => (
         <div key={i.code} style={OV.row}>
@@ -126,7 +130,7 @@ function BatchOverlay({ items }: { items: BatchItem[] }) {
     </div>
   )
 }
-const OV_COLOR: Record<BatchStatus, string> = { pending: '#fcd34d', added: '#4ade80', exists: '#cbd5e1', notfound: '#f87171', error: '#f87171' }
+const OV_COLOR: Record<BatchStatus, string> = { pending: '#fcd34d', added: '#4ade80', exists: '#cbd5e1', inProducts: '#fb923c', notfound: '#f87171', error: '#f87171' }
 const OV: Record<string, CSSProperties> = {
   box: {
     width: '100%', maxWidth: 420, padding: '10px 14px', borderRadius: 12, background: 'rgba(15,23,42,.78)',
@@ -355,7 +359,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
   // ---------- 查書 ----------
   const [code, setCode] = useState('')
   const [looking, setLooking] = useState(false)
-  const [lookup, setLookup] = useState<{ result: LookupResult; existingId: number | null; existingNote: string | null } | null>(null)
+  const [lookup, setLookup] = useState<AdminLookup | null>(null)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [autoAdd, setAutoAdd] = useState(() => { try { return localStorage.getItem(AUTO_ADD_KEY) === '1' } catch { return false } })
@@ -431,7 +435,21 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
       setLookup(r)
       setNote(r.existingNote ?? '')
       const res = r.result
-      if (autoAdd && res.found && res.info && (res.kind === 'book' || res.kind === 'product'))
+      // 2026-11-10 業主：已經在商品清單（已經在賣）就跳提示，也不自動加入採購清單，避免重複採購
+      if (r.product) {
+        const p = r.product
+        Modal.warning({
+          title: '這本已經在商品清單裡',
+          content: (
+            <div style={{ lineHeight: 1.8 }}>
+              <div>{p.name}</div>
+              <div>店內碼：{p.sku}　庫存：{p.stock}　{p.isListed ? '上架中' : '已下架'}</div>
+              {autoAdd && <div style={{ color: '#d97706' }}>所以這次<b>沒有</b>自動加入採購清單；要補貨的話可以自己按「加入採購清單」。</div>}
+            </div>
+          ),
+          okText: '知道了',
+        })
+      } else if (autoAdd && res.found && res.info && (res.kind === 'book' || res.kind === 'product'))
         await save(res.info, r.existingNote ?? '')
     } catch (e) {
       message.error(e instanceof ApiError ? e.message : '查詢失敗')
@@ -459,6 +477,11 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
       const res = r.result
       if (!res.found || !res.info || (res.kind !== 'book' && res.kind !== 'product')) {
         setBatchItem(c, { status: 'notfound', msg: res.error ?? undefined })
+        return
+      }
+      // 已經在商品清單：不加入採購清單，只標示（2026-11-10 業主決定）
+      if (r.product) {
+        setBatchItem(c, { status: 'inProducts', title: r.product.name, msg: `店內碼 ${r.product.sku}・庫存 ${r.product.stock}` })
         return
       }
       // 原本有備註就沿用，不要被清掉
@@ -632,7 +655,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
           const c = batchCounts(batch)
           return (
             <Alert style={{ marginTop: 12 }} type={c.failed ? 'warning' : 'success'} showIcon
-              message={`連續掃描 ${batch.length} 本：加入 ${c.added}・原本就有 ${c.exists}・查不到或失敗 ${c.failed}${c.pending ? `・還在查 ${c.pending}` : ''}`}
+              message={`連續掃描 ${batch.length} 本：加入 ${c.added}・原本就有 ${c.exists}${c.inProducts ? `・已在商品清單 ${c.inProducts}（沒加入）` : ''}・查不到或失敗 ${c.failed}${c.pending ? `・還在查 ${c.pending}` : ''}`}
               description={
                 <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                   {batch.map(i => (
@@ -673,6 +696,10 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
             )}
             {canAdd && res.info && (
               <>
+                {lookup?.product && (
+                  <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+                    message={`已在商品清單：店內碼 ${lookup.product.sku}・庫存 ${lookup.product.stock}・${lookup.product.isListed ? '上架中' : '已下架'}`} />
+                )}
                 {lookup?.existingId && <Tag color="green" style={{ marginBottom: 8 }}>已在採購清單裡</Tag>}
                 <BookDetail info={res.info} />
                 <div style={{ marginTop: 8 }}><StatusTags statuses={res.statuses} /></div>
@@ -705,7 +732,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
           placeholder="書名、作者、出版社或 ISBN" style={{ maxWidth: 360, marginBottom: 12 }} />
         {/* ⭐ 手機（< md）改成「封面＋一欄文字＋操作」，不用左右滑動看寬表格 */}
         <Table<BookRow>
-          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1360 }}
+          rowKey="id" size="small" loading={loading} dataSource={rows} scroll={isNarrow ? undefined : { x: 1400 }}
           // 勾選要送審的書；換頁也記得之前勾的（preserveSelectedRowKeys）
           rowSelection={{
             selectedRowKeys: picked.map(b => b.id), preserveSelectedRowKeys: true,
@@ -719,6 +746,7 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
                 <div style={{ minWidth: 0, lineHeight: 1.5 }}>
                   <a onClick={() => setViewing(r)} style={{ fontWeight: 600 }}>{r.title}</a>
                   {r.kind === 'product' && <Tag style={{ marginLeft: 6 }}>商品</Tag>}
+                  {r.product && <InProductTag p={r.product} />}
                   {(r.authors || r.publisher || r.pubDate) && (
                     <div style={{ fontSize: 12, color: 'var(--c-text-secondary, #64748b)' }}>
                       {[r.authors, r.publisher, r.pubDate].filter(Boolean).join(' ・ ')}
@@ -738,7 +766,11 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
             { title: '', key: 'cover', width: 52, render: (_, r) => coverCell(r) },
             { title: '類型', dataIndex: 'kind', width: 64, render: k => k === 'product' ? <Tag>商品</Tag> : <Tag color="blue">書</Tag> },
             // ⭐ 文字欄一律單行、太長用「…」（滑過去看全文），每列高度才會一致
-            { title: '名稱', dataIndex: 'title', width: 220, ellipsis: { showTitle: false }, render: (t: string, r) => <a onClick={() => setViewing(r)} title={t}>{t}</a> },
+            {
+              title: '名稱', dataIndex: 'title', width: 260, ellipsis: { showTitle: false }, render: (t: string, r) => (
+                <>{r.product && <InProductTag p={r.product} />}<a onClick={() => setViewing(r)} title={t}>{t}</a></>
+              ),
+            },
             { title: '作者／品牌', dataIndex: 'authors', width: 160, ellipsis: true },
             { title: '出版社／規格', dataIndex: 'publisher', width: 140, ellipsis: true },
             { title: '出版日期', dataIndex: 'pubDate', width: 100, ellipsis: true },
@@ -864,5 +896,14 @@ function PurchaseList({ onSubmitted }: { onSubmitted: (orderNo: string) => void 
           placeholder="說明（選填）：為什麼要買、預算…" style={{ marginTop: 12 }} />
       </Modal>
     </Space>
+  )
+}
+
+/** 採購清單上「已在商品清單」的橘色標籤；滑過去看店內碼、庫存、上下架（2026-11-10） */
+function InProductTag({ p }: { p: { sku: string; stock: number; isListed: boolean } }) {
+  return (
+    <Tag color="orange" style={{ marginRight: 6 }} title={`店內碼 ${p.sku}・庫存 ${p.stock}・${p.isListed ? "上架中" : "已下架"}`}>
+      已在商品清單
+    </Tag>
   )
 }
