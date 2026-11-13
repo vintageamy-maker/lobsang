@@ -167,3 +167,9 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
   .info { grid-template-columns: 1fr; gap: 0; }
   .info dd { margin-bottom: 8px; }
 }
+
+/* 延伸閱讀連結（2026-11-13：立體書重點整理） */
+.notes-links { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 14px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.notes-links span { color: #64748b; }
+.notes-links a { text-decoration: none; }
+.notes-links a:hover { text-decoration: underline; }

@@ -20,6 +20,11 @@ export default function App() {
 
       <ProductSearch initial={new URLSearchParams(location.search).get('q') ?? ''} />
 
+      {/* 2026-11-13 業主：前台放《立體書不可思議》重點整理的連結（靜態頁 public/notes/popup-book.html） */}
+      <nav className="notes-links" aria-label="延伸閱讀">
+        <span>延伸閱讀</span>
+        <a href="/notes/popup-book.html">📖 立體書不可思議 重點整理</a>
+      </nav>
     </div>
   )
 }
