@@ -42,6 +42,55 @@ function errorText(e: unknown): string {
   return '相機開不起來，請改用手動輸入。'
 }
 
+/**
+ * 補「白色留白」再讀一次用（2026-11-19 業主：深色封面的書掃不到，例：ISBN 9780735846289 The Night）。
+ * ⚠ 有些書把條碼直接印在深色封面上，黑線兩旁只留一根細線寬的白邊，外面就是深色底，
+ *    沒有條碼規定的「留白區」，zxing 找不到條碼的頭尾就讀不出來（tryInvert 也沒用，那是白線深底另一種情況）。
+ * ⭐ 做法：一列一列看，比這列平均暗的連續一段如果長過「一般線條寬度的 5 倍」，就不可能是條碼的線，
+ *    把它塗白，等於幫條碼補上留白，再交給 zxing 讀。
+ *    binary=false 保留原本灰階（解析度低、線條細時比較準）；true 改成純黑白（解析度高時比較準），
+ *    兩種輪流試（用業主的照片在 5 種解析度下測過，每種至少一個讀得到）。
+ * ⭐ 只有一般讀法讀不到時才做，平常掃得到的條碼不受影響；EAN／UPC 有檢查碼，不會讀出錯的號碼。
+ */
+function fillQuietZones(src: Uint8ClampedArray, w: number, h: number, binary: boolean): ImageData {
+  const out = new ImageData(w, h)
+  const o = out.data
+  const gray = new Float32Array(w)
+  const runs: number[] = []
+  const lens: number[] = []
+  for (let y = 0; y < h; y++) {
+    let sum = 0
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      const g = src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114
+      gray[x] = g
+      sum += g
+    }
+    const thr = sum / w
+    runs.length = 0
+    let start = 0
+    for (let x = 1; x <= w; x++) {
+      if (x === w || (gray[x] < thr) !== (gray[start] < thr)) { runs.push(start, x - start); start = x }
+    }
+    lens.length = 0
+    for (let k = 1; k < runs.length; k += 2) lens.push(runs[k])
+    lens.sort((a, b) => a - b)
+    const limit = Math.max(8, lens[lens.length >> 1] * 5)
+    for (let k = 0; k < runs.length; k += 2) {
+      const s = runs[k], n = runs[k + 1]
+      const dark = gray[s] < thr
+      const fill = dark && n > limit
+      for (let x = s; x < s + n; x++) {
+        const i = (y * w + x) * 4
+        const v = fill ? 255 : binary ? (dark ? 0 : 255) : gray[x]
+        o[i] = o[i + 1] = o[i + 2] = v
+        o[i + 3] = 255
+      }
+    }
+  }
+  return out
+}
+
 /** 連續模式下，同一個條碼要隔多久才算「又掃一次」（條碼停在鏡頭前時不會一直重複送出） */
 const SAME_CODE_GAP_MS = 3000
 
@@ -85,11 +134,25 @@ export function BarcodeScanner({ onDetect, onClose, continuous = false, children
         await video.play()
         setReady(true)
 
+        // 一般讀法讀不到時，把畫面畫到 canvas、補留白再讀一次（見 fillQuietZones）
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        let retry = 0
+        const detectFilled = async (): Promise<string | null> => {
+          const w = video.videoWidth, h = video.videoHeight
+          if (!ctx || !w || !h) return null
+          if (canvas.width !== w) canvas.width = w
+          if (canvas.height !== h) canvas.height = h
+          ctx.drawImage(video, 0, 0, w, h)
+          const img = fillQuietZones(ctx.getImageData(0, 0, w, h).data, w, h, retry++ % 2 === 1)
+          return pick((await detector.detect(img)).map(b => b.rawValue))
+        }
+
         const tick = async () => {
           if (stopped) return
           try {
             if (video.readyState >= 2) {
-              const found = pick((await detector.detect(video)).map(b => b.rawValue))
+              const found = pick((await detector.detect(video)).map(b => b.rawValue)) ?? (stopped ? null : await detectFilled())
               if (found && !stopped) {
                 if (!continuousRef.current) {
                   stopped = true
