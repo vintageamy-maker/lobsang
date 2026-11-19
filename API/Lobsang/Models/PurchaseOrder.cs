@@ -28,6 +28,13 @@ namespace Lobsang.Models
 
         public List<PurchaseOrderItem> Items { get; set; } = [];
 
+        /// <summary>
+        /// 刪單（2026-11-19 業主）：有值＝已刪除，列表和明細都看不到，但資料留在資料庫（誤刪救得回來，操作紀錄有誰刪的）。
+        /// ⭐ 刪單時待審的書一起消失、不回採購清單；已上架建立的商品保留（業主決定）。
+        /// </summary>
+        public DateTime? DeletedAt { get; set; }
+        public int? DeletedBy { get; set; }
+
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public int? CreatedBy { get; set; }

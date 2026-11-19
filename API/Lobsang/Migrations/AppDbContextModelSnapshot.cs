@@ -1008,6 +1008,14 @@ namespace Lobsang.Migrations
                         .HasColumnType("int")
                         .HasColumnName("created_by");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<int?>("DeletedBy")
+                        .HasColumnType("int")
+                        .HasColumnName("deleted_by");
+
                     b.Property<int>("InstitutionId")
                         .HasColumnType("int")
                         .HasColumnName("institution_id");

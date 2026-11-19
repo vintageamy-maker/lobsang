@@ -22,6 +22,8 @@ namespace Lobsang.Controllers
     ///   GET  /api/admin/purchase-orders/{id}                  採購單明細
     ///   POST /api/admin/purchase-orders/{id}/decide           核准／退回（purchase.approve）；退回的書回到採購清單
     ///   POST /api/admin/purchase-orders/items/{itemId}/list   核准的「上架」：填店內碼等 → 建商品
+    ///   DELETE /api/admin/purchase-orders/{id}                刪單（2026-11-19）：只做標記（DeletedAt），列表、明細都看不到
+    ///   ⭐ 列表可帶 from／to（yyyy-MM-dd，台灣日期）篩送審日期
     /// ⭐ 送審、上架用 book.manage；核准／退回另外要 purchase.approve（業主決定先只給系統管理員）。
     /// </summary>
     [ApiController]
@@ -66,9 +68,13 @@ namespace Lobsang.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> List()
+        public async Task<IActionResult> List([FromQuery] DateOnly? from, [FromQuery] DateOnly? to)
         {
-            var orders = await db.PurchaseOrders.AsNoTracking().Where(o => o.InstitutionId == InstitutionId)
+            var q = db.PurchaseOrders.AsNoTracking().Where(o => o.InstitutionId == InstitutionId && o.DeletedAt == null);
+            // 日期篩選（2026-11-19 業主）：以台灣日期算，送審時間存的是 UTC，所以邊界往前推 8 小時
+            if (from is { } f) { var t = f.ToDateTime(TimeOnly.MinValue).AddHours(-8); q = q.Where(o => o.SubmittedAt >= t); }
+            if (to is { } e) { var t = e.AddDays(1).ToDateTime(TimeOnly.MinValue).AddHours(-8); q = q.Where(o => o.SubmittedAt < t); }
+            var orders = await q
                 .OrderByDescending(o => o.SubmittedAt).ThenByDescending(o => o.Id)
                 .Select(o => new
                 {
@@ -91,8 +97,8 @@ namespace Lobsang.Controllers
         public async Task<IActionResult> Get(int id)
         {
             var o = await db.PurchaseOrders.AsNoTracking().Include(x => x.Items)
-                .FirstOrDefaultAsync(x => x.Id == id && x.InstitutionId == InstitutionId);
-            if (o is null) return NotFound(new { message = "找不到這張採購單" });
+                .FirstOrDefaultAsync(x => x.Id == id && x.InstitutionId == InstitutionId && x.DeletedAt == null);
+            if (o is null) return NotFound(new { message = "找不到這張採購單（可能已被刪除）" });
             var names = await UserNamesAsync(o.Items.Where(i => i.DecidedBy != null).Select(i => i.DecidedBy!.Value).Append(o.SubmittedBy));
             // 上架後商品可能被刪掉（2026-11-08 商品可刪除）：查一下還在不在，畫面顯示「商品已刪除」
             var listedIds = o.Items.Where(i => i.ProductId != null).Select(i => i.ProductId!.Value).ToList();
@@ -116,8 +122,8 @@ namespace Lobsang.Controllers
         [RequirePermission("purchase.approve")]
         public async Task<IActionResult> Decide(int id, DecidePurchaseRequest req)
         {
-            var o = await db.PurchaseOrders.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == id && x.InstitutionId == InstitutionId);
-            if (o is null) return NotFound(new { message = "找不到這張採購單" });
+            var o = await db.PurchaseOrders.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == id && x.InstitutionId == InstitutionId && x.DeletedAt == null);
+            if (o is null) return NotFound(new { message = "找不到這張採購單（可能已被刪除）" });
             if (!req.Approve && string.IsNullOrWhiteSpace(req.Reason)) return BadRequest(new { message = "退回要寫原因" });
             var items = o.Items.Where(i => req.ItemIds.Contains(i.Id) && i.Status == PurchaseItemStatus.Pending).ToList();
             if (items.Count == 0) return BadRequest(new { message = "沒有可以處理的（只能處理待審的）" });
@@ -151,7 +157,7 @@ namespace Lobsang.Controllers
         public async Task<IActionResult> ListItem(int itemId, ListPurchaseItemRequest req)
         {
             var item = await db.PurchaseOrderItems.Include(i => i.PurchaseOrder)
-                .FirstOrDefaultAsync(i => i.Id == itemId && i.PurchaseOrder!.InstitutionId == InstitutionId);
+                .FirstOrDefaultAsync(i => i.Id == itemId && i.PurchaseOrder!.InstitutionId == InstitutionId && i.PurchaseOrder.DeletedAt == null);
             if (item is null) return NotFound(new { message = "找不到這筆採購明細" });
             if (item.Status != PurchaseItemStatus.Approved) return BadRequest(new { message = "只有「核准」的才能上架" });
             var sku = req.Sku?.Trim() ?? "";
@@ -178,6 +184,25 @@ namespace Lobsang.Controllers
             audit.Log("purchase.list", "product", p.Id, null, new { item.PurchaseOrder!.OrderNo, p.Sku, p.Name, p.Code });
             await db.SaveChangesAsync();
             return Ok(new { productId = p.Id });
+        }
+
+        /// <summary>
+        /// 刪單（2026-11-19 業主）：能送審的人（book.manage）都可以刪；任何狀態的單都能刪。
+        /// ⭐ 只標記 DeletedAt（隱藏），不真的刪資料；待審的書不回採購清單；已上架的商品保留。
+        /// ⭐ 單號流水號照算（NextOrderNoAsync 不排除已刪的），刪掉的單號不會被重複使用。
+        /// </summary>
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var o = await db.PurchaseOrders.Include(x => x.Items)
+                .FirstOrDefaultAsync(x => x.Id == id && x.InstitutionId == InstitutionId && x.DeletedAt == null);
+            if (o is null) return NotFound(new { message = "找不到這張採購單（可能已被刪除）" });
+            o.DeletedAt = DateTime.UtcNow;
+            o.DeletedBy = UserId;
+            audit.Log("purchase.delete", "purchase_order", o.Id,
+                      new { o.OrderNo, items = o.Items.Select(i => new { i.Code, i.Title, i.Quantity, i.Status, i.ProductId }) }, null);
+            await db.SaveChangesAsync();
+            return Ok();
         }
 
         /// <summary>採購單號：PO-yyyyMMdd-流水號（以台灣日期算）</summary>

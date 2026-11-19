@@ -5,12 +5,15 @@
  *       → 核准的按「上架」填店內碼、分類、售價、庫存 → 變成商品（products）
  * ⭐ 退回的書，後端會放回採購清單（備註註明哪張單退回、原因）。
  * ⭐ 採購單是紀錄：送出後明細不變，只變狀態（業主要「有紀錄每次的採購清單內容」）。
+ * ⭐ 2026-11-19 業主：加「刪單」（能送審的人都能刪、任何狀態都能刪；後端只做隱藏，待審的書不回採購清單，
+ *    已上架的商品保留）和「送審日期」篩選。
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message, Grid,
+  Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message, Grid,
 } from 'antd'
-import { CheckOutlined, CloseOutlined, ReloadOutlined, ShopOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, DeleteOutlined, ReloadOutlined, ShopOutlined } from '@ant-design/icons'
+import type { Dayjs } from 'dayjs'
 import { api, ApiError, auth } from '../api'
 import { BookDetail, Cover, type BookInfo } from './Books'
 
@@ -45,13 +48,19 @@ export default function PurchaseOrders({ refreshKey }: { refreshKey: number }) {
   const [detail, setDetail] = useState<OrderDetail | null>(null)
   const [selected, setSelected] = useState<number[]>([])
   const [busy, setBusy] = useState(false)
+  const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setOrders(await api.get<OrderRow[]>('/api/admin/purchase-orders')) }
+    try {
+      const qs = new URLSearchParams()
+      if (range?.[0]) qs.set('from', range[0].format('YYYY-MM-DD'))
+      if (range?.[1]) qs.set('to', range[1].format('YYYY-MM-DD'))
+      setOrders(await api.get<OrderRow[]>(`/api/admin/purchase-orders${qs.size ? '?' + qs : ''}`))
+    }
     catch (e) { message.error(e instanceof ApiError ? e.message : '載入採購單失敗') }
     finally { setLoading(false) }
-  }, [])
+  }, [range])
   useEffect(() => { load() }, [load, refreshKey])
 
   const openDetail = async (id: number) => {
@@ -61,6 +70,28 @@ export default function PurchaseOrders({ refreshKey }: { refreshKey: number }) {
     } catch (e) { message.error(e instanceof ApiError ? e.message : '載入採購單失敗') }
   }
   const reloadDetail = async () => { if (detail) await openDetail(detail.id); load() }
+
+  // ---------- 刪單 ----------
+  const confirmDelete = (o: { id: number; orderNo: string }) => {
+    Modal.confirm({
+      title: `確定要刪除採購單 ${o.orderNo}？`,
+      content: (
+        <div>
+          <div>刪除後這張單在列表看不到；還在「待審」的書會一起刪掉，<b>不會</b>回到採購清單。</div>
+          <div>已經上架的商品不受影響，會留在商品清單。</div>
+        </div>
+      ),
+      okText: '刪除', okButtonProps: { danger: true }, cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.del(`/api/admin/purchase-orders/${o.id}`)
+          message.success(`已刪除採購單 ${o.orderNo}`)
+          if (detail?.id === o.id) setDetail(null)
+          load()
+        } catch (e) { message.error(e instanceof ApiError ? e.message : '刪除失敗') }
+      },
+    })
+  }
 
   // ---------- 核准／退回 ----------
   const [rejectOpen, setRejectOpen] = useState(false)
@@ -121,13 +152,15 @@ export default function PurchaseOrders({ refreshKey }: { refreshKey: number }) {
         <Alert type="info" showIcon style={{ marginBottom: 12 }}
           message="你可以看採購單和把核准的書上架；核准／退回要有「採購審核」權限（目前只有系統管理員）。" />
       )}
-      <Space style={{ marginBottom: 12 }}>
+      <Space wrap style={{ marginBottom: 12 }}>
+        <DatePicker.RangePicker value={range} onChange={v => setRange(v as [Dayjs | null, Dayjs | null] | null)}
+          placeholder={['送審日期（起）', '（迄）']} allowEmpty={[true, true]} />
         <Button icon={<ReloadOutlined />} onClick={load}>重新整理</Button>
-        <Typography.Text type="secondary">共 {orders.length} 張採購單</Typography.Text>
+        <Typography.Text type="secondary">{range ? '符合日期的' : '共'} {orders.length} 張採購單</Typography.Text>
       </Space>
       <Table<OrderRow>
         rowKey="id" size="small" loading={loading} dataSource={orders} pagination={{ pageSize: 20, showSizeChanger: false }}
-        locale={{ emptyText: '還沒有採購單。到「採購清單」分頁勾選要買的書，按「送審」。' }}
+        locale={{ emptyText: range ? '這段日期沒有採購單。' : '還沒有採購單。到「採購清單」分頁勾選要買的書，按「送審」。' }}
         columns={isNarrow ? [
           {
             title: '採購單', key: 'main', render: (_, o) => (
@@ -138,6 +171,7 @@ export default function PurchaseOrders({ refreshKey }: { refreshKey: number }) {
               </div>
             ),
           },
+          { title: '', key: 'del', width: 48, render: (_, o) => <Button size="small" danger icon={<DeleteOutlined />} aria-label="刪除採購單" onClick={() => confirmDelete(o)} /> },
         ] : [
           { title: '採購單號', dataIndex: 'orderNo', width: 160, render: (t: string, o) => <a onClick={() => openDetail(o.id)}>{t}</a> },
           { title: '送審時間', dataIndex: 'submittedAt', width: 170, render: (s: string) => localTime(s) },
@@ -146,12 +180,16 @@ export default function PurchaseOrders({ refreshKey }: { refreshKey: number }) {
           { title: '總冊數', dataIndex: 'quantity', width: 80 },
           { title: '狀態', key: 'status', render: (_, o) => statusTags(o) },
           { title: '說明', dataIndex: 'note', ellipsis: true },
+          { title: '操作', key: 'del', width: 90, render: (_, o) => <Button size="small" danger icon={<DeleteOutlined />} onClick={() => confirmDelete(o)}>刪單</Button> },
         ]}
       />
 
       {/* 採購單明細 */}
       <Modal title={detail ? `採購單 ${detail.orderNo}` : ''} open={!!detail} onCancel={() => setDetail(null)} width={980} destroyOnHidden
-        footer={<Button type="primary" onClick={() => setDetail(null)}>關閉</Button>}>
+        footer={<Space>
+          {detail && <Button danger icon={<DeleteOutlined />} onClick={() => confirmDelete(detail)}>刪單</Button>}
+          <Button type="primary" onClick={() => setDetail(null)}>關閉</Button>
+        </Space>}>
         {detail && (
           <>
             <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
