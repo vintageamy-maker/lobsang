@@ -28,6 +28,7 @@ interface Product {
   stock: number               // 庫存
   isListed: boolean           // 上架（前台只查得到上架的）
   info: BookInfo | null       // 查書補到的資料
+  relatedIds: number[]        // 相關推薦（其他商品的 id，照填的順序；2026-11-19）
 }
 
 // ---------- 匯入 ----------
@@ -200,7 +201,7 @@ export default function Products() {
     try {
       const r = await api.put<Product>(`/api/admin/products/${p.id}`, {
         name: next.name, midCategory: next.midCategory, subCategory: next.subCategory,
-        salePrice: next.salePrice, stock: next.stock, isListed: next.isListed,
+        salePrice: next.salePrice, stock: next.stock, isListed: next.isListed, relatedIds: next.relatedIds,
       })
       replace(r)
       return true
@@ -286,14 +287,14 @@ export default function Products() {
 
   const openEdit = (p: Product) => {
     setEditing(p)
-    form.setFieldsValue({ name: p.name, midCategory: p.midCategory, subCategory: p.subCategory, salePrice: p.salePrice, stock: p.stock, isListed: p.isListed })
+    form.setFieldsValue({ name: p.name, midCategory: p.midCategory, subCategory: p.subCategory, salePrice: p.salePrice, stock: p.stock, isListed: p.isListed, relatedIds: p.relatedIds })
   }
   const saveEdit = async () => {
     if (!editing) return
     const v = await form.validateFields()
     const ok = await save(editing, {
       name: v.name, midCategory: v.midCategory ?? null, subCategory: v.subCategory ?? null,
-      salePrice: v.salePrice ?? null, stock: v.stock ?? 0, isListed: !!v.isListed,
+      salePrice: v.salePrice ?? null, stock: v.stock ?? 0, isListed: !!v.isListed, relatedIds: v.relatedIds ?? [],
     })
     if (ok) { setEditing(null); message.success('已儲存') }
   }
@@ -390,7 +391,9 @@ export default function Products() {
             <Button type="primary" onClick={() => setViewingId(null)}>關閉</Button>
           </Space>
         )}>
-        {viewing && <ProductDetail p={viewing} loading={autoFilling === viewing.id} narrow={isNarrow} />}
+        {viewing && <ProductDetail p={viewing} loading={autoFilling === viewing.id} narrow={isNarrow}
+          related={viewing.relatedIds.map(id => items.find(x => x.id === id)).filter((x): x is Product => !!x)}
+          onOpen={id => setViewingId(id)} />}
       </Modal>
 
       {/* 編輯 */}
@@ -407,6 +410,12 @@ export default function Products() {
             <Form.Item name="stock" label="庫存"><InputNumber min={0} precision={0} style={{ width: 120 }} /></Form.Item>
             <Form.Item name="isListed" label="上架" valuePropName="checked"><Switch /></Form.Item>
           </Space>
+          {/* 相關推薦（2026-11-19 業主）：從商品清單挑，前台「詳細內容」底下會列出（只列上架中的） */}
+          <Form.Item name="relatedIds" label="相關推薦" extra="打書名或店內碼搜尋，可選多本（最多 20 本）；前台「詳細內容」底下會列出上架中的。">
+            <Select mode="multiple" allowClear showSearch maxCount={20} placeholder="搜尋要推薦的商品"
+              optionFilterProp="label"
+              options={items.filter(x => x.id !== editing?.id).map(x => ({ value: x.id, label: `${x.sku} ${x.name}${x.isListed ? '' : '（下架）'}` }))} />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -447,7 +456,9 @@ export default function Products() {
  *   下：商品規格（ISBN、頁數、語言、分類、店內碼…）
  * ⭐ 名稱用業主清單上的商品名稱；書籍資料來自「查書補資料」（誠品優先，再來國圖、Google Books 等）。
  */
-function ProductDetail({ p, loading, narrow }: { p: Product; loading: boolean; narrow: boolean }) {
+function ProductDetail({ p, loading, narrow, related, onOpen }: {
+  p: Product; loading: boolean; narrow: boolean; related: Product[]; onOpen: (id: number) => void
+}) {
   const info = p.info
   const money = (n: number | null) => (n == null ? null : `NT$${n.toLocaleString()}`)
   const dash = <Typography.Text type="secondary">—</Typography.Text>
@@ -482,6 +493,23 @@ function ProductDetail({ p, loading, narrow }: { p: Product; loading: boolean; n
           </div>
         </div>
       </div>
+
+      {related.length > 0 && (
+        <>
+          <Typography.Title level={5} style={{ marginTop: 20 }}>相關推薦</Typography.Title>
+          <Space size={[12, 12]} wrap>
+            {related.map(r => (
+              <a key={r.id} onClick={() => onOpen(r.id)} style={{ display: 'flex', gap: 8, alignItems: 'center', width: 240 }}>
+                <Cover covers={r.info?.covers ?? []} width={40} fixed />
+                <span style={{ lineHeight: 1.4 }}>
+                  <span>{r.name}</span>
+                  <br /><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.sku}{r.isListed ? '' : '・下架'}</Typography.Text>
+                </span>
+              </a>
+            ))}
+          </Space>
+        </>
+      )}
 
       <Typography.Title level={5} style={{ marginTop: 20 }}>內容簡介</Typography.Title>
       {info?.description

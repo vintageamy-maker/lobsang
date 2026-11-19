@@ -173,3 +173,13 @@ details.desc summary { cursor: pointer; font-weight: 600; color: #475569; }
 .notes-links span { color: #64748b; }
 .notes-links a { text-decoration: none; }
 .notes-links a:hover { text-decoration: underline; }
+
+/* 相關推薦（2026-11-19）：商品詳細內容底下 */
+.related { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+.related h3 { font-size: 15px; margin: 0 0 10px; color: #0f172a; }
+.related ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.related button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; cursor: pointer; font: inherit; }
+.related button:hover { border-color: #d97706; background: #fffbeb; }
+.related-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; }
+.related-text strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.related-text span { color: #b45309; }

@@ -12,6 +12,7 @@ namespace Lobsang.Controllers
     /// ⭐ 只回「上架」的商品；價格只給業主自己的售價（查書資料裡的定價、誠品售價在這裡拿掉，業主決定）。
     /// ⭐ 沒給關鍵字也沒給條碼 ⇒ 回空的（前台預設不列出，不讓人一次拿到全部商品）。
     /// ⚠ 不用登入 ⇒ 掛限流（跟搜尋書單同一個規則，以 IP 計）。
+    /// ⭐ 每筆帶 related（相關推薦，2026-11-19）：只列上架中的，給店內碼、名稱、售價、第一張封面；前台點了再用店內碼查完整資料。
     /// </summary>
     [ApiController]
     [Route("api/public/products")]
@@ -38,6 +39,15 @@ namespace Lobsang.Controllers
 
             var total = await query.CountAsync(ct);
             var rows = await query.OrderBy(p => p.Name).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+            var relIds = rows.Select(p => (p.Id, ids: ProductQueries.ParseRelated(p.RelatedJson))).ToList();
+            var allRel = relIds.SelectMany(x => x.ids).Distinct().ToList();
+            var relRows = allRel.Count == 0 ? new List<Lobsang.Models.Product>() : await db.Products.AsNoTracking()
+                .Where(p => p.IsListed && allRel.Contains(p.Id)).ToListAsync(ct);
+            var relMap = relRows.ToDictionary(p => p.Id, p => new
+            {
+                sku = p.Sku, name = p.Name, salePrice = p.SalePrice,
+                cover = p.DataJson is "{}" or "" ? null : BookQueries.ParseInfo(p.DataJson)?.Covers.FirstOrDefault(),
+            });
             return Ok(new
             {
                 total, page, pageSize,
@@ -49,6 +59,7 @@ namespace Lobsang.Controllers
                     {
                         sku = p.Sku, name = p.Name, code = p.Code, midCategory = p.MidCategory, subCategory = p.SubCategory,
                         salePrice = p.SalePrice, stock = p.Stock, authors = p.Authors, info,
+                        related = ProductQueries.ParseRelated(p.RelatedJson).Where(relMap.ContainsKey).Select(id => relMap[id]).ToList(),
                     };
                 }),
             });

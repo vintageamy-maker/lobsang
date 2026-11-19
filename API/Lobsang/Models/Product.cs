@@ -49,6 +49,14 @@ namespace Lobsang.Models
         /// <summary>查書補到的完整資料（BookInfo 的 JSON），還沒查是 "{}"</summary>
         public string DataJson { get; set; } = "{}";
 
+        /// <summary>
+        /// 相關推薦（2026-11-19 業主）：從商品清單挑的其他商品 id，JSON 陣列，例 [12,35]，照填的順序顯示。
+        /// ⭐ 存 id 不存店內碼：商品改名、改價、改店內碼都會自動跟著變；被刪掉的商品讀的時候直接略過。
+        /// ⭐ 前台「詳細內容」底下列出（只列上架中的）。
+        /// </summary>
+        [MaxLength(2000)]
+        public string RelatedJson { get; set; } = "[]";
+
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public int? CreatedBy { get; set; }

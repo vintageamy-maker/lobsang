@@ -86,7 +86,11 @@ export interface ProductItem {
   stock: number
   authors?: string | null
   info?: BookInfo | null
+  /** 相關推薦（後台挑的，只有上架中的；2026-11-19） */
+  related?: RelatedItem[]
 }
+
+export interface RelatedItem { sku: string; name: string; salePrice?: number | null; cover?: string | null }
 
 export interface ProductPage { total: number; page: number; pageSize: number; items: ProductItem[] }
 

@@ -64,6 +64,15 @@ function ProductSearch({ initial }: { initial: string }) {
   useEffect(() => { if (initial) run({ q: initial }) }, [initial, run])
 
   const submit = (e: FormEvent) => { e.preventDefault(); run({ q }) }
+
+  // 點「相關推薦」：用店內碼查那本的完整資料，換到它的詳細內容
+  const openSku = useCallback(async (sku: string) => {
+    try {
+      const r = await searchProducts({ q: sku })
+      const hit = r.items.find(x => x.sku === sku)
+      if (hit) setOpen(hit)
+    } catch { /* 查不到就留在原本這本 */ }
+  }, [])
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
   return (
@@ -125,7 +134,7 @@ function ProductSearch({ initial }: { initial: string }) {
           )}
         </>
       )}
-      {open && <ProductModal item={open} onClose={() => setOpen(null)} />}
+      {open && <ProductModal item={open} onClose={() => setOpen(null)} onOpenSku={openSku} />}
     </>
   )
 }
@@ -134,7 +143,7 @@ function ProductSearch({ initial }: { initial: string }) {
  * 商品的詳細資料（彈窗）。外框照後台 antd Modal：標題列「詳細資料」＋右上 ✕、關閉鈕在右下。
  * ⭐ 名稱用業主清單上的商品名稱；最前面放店內碼、售價、庫存、分類，下面接查書資料（封面、作者、簡介…）。
  */
-function ProductModal({ item, onClose }: { item: ProductItem; onClose: () => void }) {
+function ProductModal({ item, onClose, onOpenSku }: { item: ProductItem; onClose: () => void; onOpenSku: (sku: string) => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -145,7 +154,7 @@ function ProductModal({ item, onClose }: { item: ProductItem; onClose: () => voi
 
   // ⚠ 不要把焦點放在最下面的「關閉」鈕（autoFocus）：資料長的時候瀏覽器會捲到底，一打開就看不到名稱
   const boxRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { boxRef.current?.focus({ preventScroll: true }) }, [])
+  useEffect(() => { boxRef.current?.focus({ preventScroll: true }); boxRef.current?.parentElement?.scrollTo?.({ top: 0 }) }, [item])
 
   const info: BookInfo = {
     ...(item.info ?? { kind: 'book', code: item.code, authors: [], categories: [], covers: [], sources: [] }),
@@ -166,6 +175,25 @@ function ProductModal({ item, onClose }: { item: ProductItem; onClose: () => voi
             ['商品分類', [item.midCategory, item.subCategory].filter(Boolean).join(' ／ ')],
             ['條碼', item.code],
           ]} />
+          {/* 相關推薦（2026-11-19 業主：後台商品編輯挑的；點了換看那本） */}
+          {!!item.related?.length && (
+            <section className="related">
+              <h3>相關推薦</h3>
+              <ul>
+                {item.related.map(r => (
+                  <li key={r.sku}>
+                    <button type="button" onClick={() => onOpenSku(r.sku)}>
+                      <Cover covers={r.cover ? [r.cover] : []} small />
+                      <span className="related-text">
+                        <strong>{r.name}</strong>
+                        <span>{money(r.salePrice) ?? '價格請洽店員'}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
         <div className="modal-foot"><button className="btn-primary" onClick={onClose}>關閉</button></div>
       </div>

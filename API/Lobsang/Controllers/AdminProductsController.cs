@@ -10,7 +10,8 @@ using Lobsang.Services.BookLookup;
 
 namespace Lobsang.Controllers
 {
-    public record UpdateProductRequest(string Name, string? MidCategory, string? SubCategory, int? SalePrice, int Stock, bool IsListed);
+    public record UpdateProductRequest(string Name, string? MidCategory, string? SubCategory, int? SalePrice, int Stock, bool IsListed,
+                                       List<int>? RelatedIds = null);
     public record ImportProductRow(string? Sku, string? Name, string? Code, string? MidCategory, string? SubCategory, int? SalePrice, int? Stock);
     public record ImportProductsRequest(List<ImportProductRow> Rows);
 
@@ -56,14 +57,22 @@ namespace Lobsang.Controllers
             if (p is null) return NotFound(new { message = "找不到這個商品" });
             if (string.IsNullOrWhiteSpace(r.Name)) return BadRequest(new { message = "請輸入商品名稱" });
             if (r.SalePrice is < 0 || r.Stock < 0) return BadRequest(new { message = "售價、庫存不能是負數" });
-            var before = new { p.Name, p.MidCategory, p.SubCategory, p.SalePrice, p.Stock, p.IsListed };
+            var before = new { p.Name, p.MidCategory, p.SubCategory, p.SalePrice, p.Stock, p.IsListed, related = p.RelatedJson };
             p.Name = Cut(r.Name.Trim(), 500)!;
             p.MidCategory = Cut(r.MidCategory?.Trim(), 100);
             p.SubCategory = Cut(r.SubCategory?.Trim(), 100);
             p.SalePrice = r.SalePrice;
             p.Stock = r.Stock;
             p.IsListed = r.IsListed;
-            audit.Log("product.update", "product", p.Id, before, new { p.Name, p.MidCategory, p.SubCategory, p.SalePrice, p.Stock, p.IsListed });
+            if (r.RelatedIds is not null)
+            {
+                // 相關推薦：去掉自己、重複、不是這個機構的；最多 20 個，照填的順序
+                var want = r.RelatedIds.Where(x => x != p.Id).Distinct().Take(20).ToList();
+                var ok = await db.Products.AsNoTracking().Where(x => x.InstitutionId == InstitutionId && want.Contains(x.Id))
+                    .Select(x => x.Id).ToListAsync();
+                p.RelatedJson = JsonSerializer.Serialize(want.Where(ok.Contains).ToList());
+            }
+            audit.Log("product.update", "product", p.Id, before, new { p.Name, p.MidCategory, p.SubCategory, p.SalePrice, p.Stock, p.IsListed, related = p.RelatedJson });
             await db.SaveChangesAsync();
             return Ok(ProductQueries.ToAdmin(p));
         }
@@ -165,7 +174,15 @@ namespace Lobsang.Controllers
             id = p.Id, sku = p.Sku, name = p.Name, code = p.Code, midCategory = p.MidCategory, subCategory = p.SubCategory,
             salePrice = p.SalePrice, stock = p.Stock, isListed = p.IsListed, updatedAt = p.UpdatedAt,
             info = p.DataJson is "{}" or "" ? null : BookQueries.ParseInfo(p.DataJson),
+            relatedIds = ParseRelated(p.RelatedJson),
         };
+
+        /// <summary>相關推薦的商品 id（壞掉的 JSON 當沒有）</summary>
+        public static List<int> ParseRelated(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return [];
+            try { return JsonSerializer.Deserialize<List<int>>(json) ?? []; } catch (JsonException) { return []; }
+        }
 
         /// <summary>EAN-8／UPC-A／EAN-13 檢查碼</summary>
         public static bool IsEanOk(string s)

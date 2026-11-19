@@ -948,6 +948,12 @@ namespace Lobsang.Migrations
                         .HasColumnType("varchar(500)")
                         .HasColumnName("name");
 
+                    b.Property<string>("RelatedJson")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("varchar(2000)")
+                        .HasColumnName("related_json");
+
                     b.Property<int?>("SalePrice")
                         .HasColumnType("int")
                         .HasColumnName("sale_price");
