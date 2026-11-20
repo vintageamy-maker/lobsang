@@ -106,6 +106,9 @@ namespace Lobsang.Services.BookLookup
                 // ⚠ 誠品線上不能在這裡（伺服器端）查：整站有 Cloudflare 機器人防護，程式查詢一律 403（2026-11-07 確認），業主決定不繞過。
                 //    誠品的資料改由前端在使用者瀏覽器查（React/src/eslite.ts），查到時前端會把這個搜尋連結換成商品頁
                 ["eslite"] = new("誠品線上", $"https://www.eslite.com/Search?keyword={isbn}"),
+                // ⚠ 博客來、台灣紀伊國屋都擋程式查詢（博客來：機器人驗證 403；紀伊國屋：429，2026-11-19 確認），
+                //    業主決定不繞過 ⇒ 只放連結，點了在使用者瀏覽器開搜尋結果
+                ["kino"] = new("紀伊國屋（台灣）", $"https://kinokuniya.com.tw/search?q={isbn}"),
                 ["ncl"] = new("國圖書號中心", "https://isbn.ncl.edu.tw/NEW_ISBNNet/"),
                 ["amzjp"] = new("Amazon.co.jp", $"https://www.amazon.co.jp/s?k={isbn}"),
                 ["hanmoto"] = new("版元ドットコム", $"https://www.hanmoto.com/bd/isbn/{isbn}"),
@@ -113,11 +116,13 @@ namespace Lobsang.Services.BookLookup
                 ["gb"] = new("Google Books", $"https://books.google.com/books?vid=ISBN{isbn}"),
                 ["ol"] = new("Open Library", $"https://openlibrary.org/isbn/{isbn}"),
             };
+            // ⭐ 2026-11-19 業主：中文、歐美書 誠品 → 博客來；日文書 誠品 → 博客來 → 台灣紀伊國屋 → openBD／Google Books
+            //    （資料來源的順序：誠品在瀏覽器查、合併時排第一；伺服器這邊 jp 是 openBD → Google Books，tw 是國圖 → Google Books）
             string[] order = region switch
             {
-                "jp" => ["amzjp", "hanmoto", "books", "eslite", "gb"],
-                "tw" => ["books", "eslite", "ncl", "gb"],
-                _ => ["amz", "gb", "ol", "books", "eslite"],
+                "jp" => ["eslite", "books", "kino", "hanmoto", "gb", "amzjp"],
+                "tw" => ["eslite", "books", "ncl", "gb"],
+                _ => ["eslite", "books", "gb", "ol", "amz"],
             };
             return order.Select(k => all[k]).ToList();
         }
@@ -354,8 +359,13 @@ namespace Lobsang.Services.BookLookup
             var res = new LookupResult
             {
                 Kind = "product", Code = code, Statuses = statuses,
+                // ⭐ 2026-11-19 業主：商品也是 誠品 → 博客來（日本商品條碼 45／49 開頭再加台灣紀伊國屋）
                 Links =
                 [
+                    new("誠品線上", $"https://www.eslite.com/Search?keyword={code}"),
+                    new("博客來", $"https://search.books.com.tw/search/query/key/{code}/cat/all"),
+                    .. (code.StartsWith("45") || code.StartsWith("49")
+                        ? new LinkItem[] { new("紀伊國屋（台灣）", $"https://kinokuniya.com.tw/search?q={code}") } : []),
                     new("Google", $"https://www.google.com/search?q={code}"),
                     new("UPCitemdb", $"https://www.upcitemdb.com/upc/{code}"),
                     new("Open Food Facts", $"https://world.openfoodfacts.org/product/{code}"),
